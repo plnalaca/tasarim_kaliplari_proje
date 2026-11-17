@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nearswap"
+version = "0.1.0"
+description = "NearSwap: EBLG443 Tasarım Kalıpları dönem projesi (Python çekirdeği)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Pelin ALACA" }, { name = "Handan VURAL" }]
+dependencies = []
+
+[project.optional-dependencies]
+# Gerçek yapay zekâ uyarlayıcıları için. Testler bunlara ihtiyaç duymaz.
+ai = ["openai>=1.0", "google-genai>=1.0", "python-dotenv>=1.0"]
+dev = ["pytest>=8", "mypy>=1.10"]
+
+[tool.setuptools.packages.find]
+include = ["nearswap*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["nearswap", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["openai.*", "google.*", "dotenv.*"]
+ignore_missing_imports = true
