@@ -10,7 +10,11 @@ EBLG443 Tasarım Kalıpları dönem projesi, İstanbul Nişantaşı Üniversites
 | Tasarım kalıpları | Builder, Adapter, State, Chain of Responsibility |
 | Yapay zekâ | Fotoğraftan ilan taslağı üretme, ilanı yayından önce denetleme (Gemini ya da OpenAI) |
 
-Tasarımın ayrıntılı anlatımı, sınıf diyagramları ve tasarım kararları için: **[docs/TASARIM.md](docs/TASARIM.md)**
+| Belge | İçerik |
+|---|---|
+| [docs/TASARIM.md](docs/TASARIM.md) | Dört kalıbın problemi, rolleri, sınıf diyagramları ve tasarım kararları |
+| [docs/KURULUM.md](docs/KURULUM.md) | Gereksinimler, kurulum adımları, yapılandırma, sık karşılaşılan durumlar |
+| [docs/TEST.md](docs/TEST.md) | Otomatik testler, kapsam, kalıplara göre testler, elle test senaryosu |
 
 ![NearSwap kullanıcı arayüzü: ilan verme formu, oda panosu ve "Ne oldu?" günlüğü](docs/demo.png)
 
@@ -18,6 +22,8 @@ Tasarımın ayrıntılı anlatımı, sınıf diyagramları ve tasarım kararlar�
 
 
 ## Çalıştırma
+
+Ayrıntılı adımlar ve sorun giderme için [docs/KURULUM.md](docs/KURULUM.md).
 
 ```bash
 python3 -m venv .venv
@@ -33,7 +39,7 @@ uvicorn nearswap.api:app
 Varsayılan yapay zekâ sağlayıcısı `fake`'tir: API anahtarı gerektirmez ve her fotoğrafa sabit bir taslak döner. Gerçek yapay zekâ için `.env` içinde `NEARSWAP_AI_PROVIDER=gemini` (ya da `openai`) yapılır ve ilgili anahtar girilir.
 
 ```bash
-pytest                                    # 117 test, gerçek API'ye istek atmaz
+pytest                                    # 117 test, kodun %99'u; ayrıntı: docs/TEST.md
 mypy                                      # strict tip denetimi
 python scripts/try_ai.py urun.jpg         # seçili sağlayıcıyı sunucu olmadan deneme
 ```
