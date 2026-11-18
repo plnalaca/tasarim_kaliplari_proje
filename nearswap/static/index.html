@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NearSwap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --wall: #E6ECF1;        /* yurt koridoru duvarı */
+    --paper: #FFFFFF;
+    --ink: #1D2840;         /* lacivert mürekkep */
+    --ink-soft: #55617A;
+    --line: #C9D3DD;
+    --active: #2E8A66;      /* aktif */
+    --reserved: #F0BC3F;    /* rezerve: sinyal sarısı */
+    --sold: #8B93A3;        /* satıldı */
+    --draft: #6C7BD0;       /* taslak */
+    --error: #B9382E;
+    --radius-card: 14px;
+    --radius-ctrl: 8px;
+    --font-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-display: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--wall); color: var(--ink);
+    font: 16px/1.5 var(--font-body);
+  }
+  :focus-visible { outline: 3px solid var(--draft); outline-offset: 2px; }
+
+  /* --- Üst şerit --------------------------------------------------------------- */
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px;
+    padding: 18px clamp(16px, 4vw, 40px); background: var(--ink); color: #fff;
+  }
+  .brand { font: 800 26px/1 var(--font-display); letter-spacing: -0.02em; margin: 0; }
+  .brand small { display: block; font: 400 13px/1.3 var(--font-body); opacity: .75; letter-spacing: 0; margin-top: 4px; }
+  .who { display: flex; gap: 16px; margin-left: auto; flex-wrap: wrap; }
+  .who label { font-size: 13px; opacity: .85; display: grid; gap: 2px; }
+  .who input {
+    width: 150px; padding: 7px 10px; border-radius: var(--radius-ctrl);
+    border: 1px solid #44506B; background: #2A3654; color: #fff; font: inherit;
+  }
+
+  /* --- Yerleşim ----------------------------------------------------------------- */
+  main {
+    display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 28px;
+    padding: 28px clamp(16px, 4vw, 40px); max-width: 1320px; margin: 0 auto;
+  }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  h2 { font: 800 22px/1.2 var(--font-display); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .hint { color: var(--ink-soft); font-size: 14px; margin: 0 0 16px; }
+
+  /* --- İlan verme paneli ------------------------------------------------------ */
+  .panel { background: var(--paper); border-radius: var(--radius-card); padding: 22px; border: 1px solid var(--line); }
+  .tabs { display: flex; gap: 4px; background: var(--wall); padding: 4px; border-radius: 10px; margin-bottom: 18px; }
+  .tabs button {
+    flex: 1; border: 0; background: transparent; padding: 9px; border-radius: 7px;
+    font: 700 14px var(--font-body); color: var(--ink-soft); cursor: pointer;
+  }
+  .tabs button[aria-selected="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 2px rgba(29,40,64,.15); }
+  form { display: grid; gap: 14px; }
+  form[hidden] { display: none; }
+  .field { display: grid; gap: 5px; font-size: 14px; font-weight: 700; }
+  .field span.opt { font-weight: 400; color: var(--ink-soft); }
+  input, select, textarea {
+    font: 16px var(--font-body); color: var(--ink); padding: 9px 11px;
+    border: 1px solid var(--line); border-radius: var(--radius-ctrl); background: #fff; width: 100%;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .drop {
+    display: grid; place-items: center; text-align: center; gap: 6px; cursor: pointer;
+    border: 2px dashed var(--line); border-radius: var(--radius-card); padding: 18px; min-height: 150px;
+    color: var(--ink-soft); background: #F6F8FA; position: relative; overflow: hidden;
+  }
+  .drop.over { border-color: var(--draft); background: #EEF0FB; }
+  .drop img { max-width: 100%; max-height: 180px; border-radius: 8px; }
+  .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+  .draft-box { border-left: 4px solid var(--draft); background: #F3F4FC; padding: 10px 14px; border-radius: 0 8px 8px 0; font-size: 14px; }
+  .draft-box[hidden] { display: none; }
+  .draft-box b { display: block; margin-bottom: 2px; }
+
+  .btn {
+    border: 0; border-radius: var(--radius-ctrl); padding: 11px 16px; cursor: pointer;
+    font: 700 15px var(--font-body); background: var(--ink); color: #fff;
+  }
+  .btn:disabled { opacity: .5; cursor: progress; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+
+  /* --- Ne oldu? günlüğü ---------------------------------------------------------- */
+  .log { margin-top: 22px; }
+  .log h3 { font: 800 16px var(--font-display); margin: 0 0 8px; }
+  .log ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 320px; overflow: auto; }
+  .log li { font-size: 14px; padding: 8px 10px; border-radius: 8px; background: var(--wall); }
+  .log li.bad { background: #F8E7E5; }
+  .log .pattern { font-weight: 700; margin-right: 6px; }
+  .log .empty { color: var(--ink-soft); background: transparent; padding: 0; }
+
+  /* --- İlan panosu --------------------------------------------------------------- */
+  .board-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 20px; margin-top: 16px; }
+  .card {
+    background: var(--paper); border-radius: var(--radius-card); border: 1px solid var(--line);
+    display: grid; grid-template-rows: 150px auto; overflow: hidden; position: relative;
+  }
+  .card.is-sold .photo, .card.is-sold .body > :not(.actions) { opacity: .55; }
+  .photo { background: #DDE4EB center/cover no-repeat; display: grid; place-items: center; color: var(--ink-soft); font-size: 13px; }
+  .body { padding: 14px 16px 16px; display: grid; gap: 6px; }
+  .title { font: 800 18px/1.25 var(--font-display); margin: 0; }
+  .price { font-size: 20px; font-weight: 700; }
+  .meta { font-size: 13px; color: var(--ink-soft); }
+  .desc { font-size: 14px; margin: 0; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .actions button {
+    border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 12px;
+    font: 700 13px var(--font-body); color: var(--ink); cursor: pointer;
+  }
+  .actions button:hover { border-color: var(--ink); }
+
+  /* Kapı askısı: ilanın durumu (State) */
+  .hanger {
+    position: absolute; top: 0; right: 16px; width: 74px; padding: 22px 6px 10px;
+    text-align: center; font: 800 13px/1.1 var(--font-display); color: var(--ink);
+    border-radius: 0 0 10px 10px; box-shadow: 0 2px 4px rgba(29,40,64,.2);
+    transform-origin: 50% 0;
+  }
+  .hanger::before {      /* kapı koluna takılan delik */
+    content: ""; position: absolute; top: 6px; left: 50%; width: 18px; height: 10px; margin-left: -9px;
+    border-radius: 0 0 10px 10px; background: var(--paper); box-shadow: inset 0 2px 2px rgba(0,0,0,.15);
+  }
+  .hanger.aktif { background: var(--active); color: #fff; }
+  .hanger.rezerve { background: var(--reserved); }
+  .hanger.satildi { background: var(--sold); color: #fff; }
+  .hanger.taslak { background: var(--draft); color: #fff; }
+  .hanger.swing { animation: swing .7s ease-out; }
+  @keyframes swing { 0% { transform: rotate(14deg); } 40% { transform: rotate(-8deg); } 70% { transform: rotate(4deg); } 100% { transform: rotate(0); } }
+  @media (prefers-reduced-motion: reduce) { .hanger.swing { animation: none; } }
+
+  .empty-board { margin-top: 16px; padding: 40px 24px; text-align: center; border: 2px dashed var(--line); border-radius: var(--radius-card); color: var(--ink-soft); }
+
+  /* Bildirim */
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(560px, 92vw);
+    background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 15px;
+    box-shadow: 0 6px 20px rgba(29,40,64,.3);
+  }
+  .toast.bad { background: var(--error); }
+  .toast[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1 class="brand">NearSwap<small>Aynı binadan al, kapıda teslim et.</small></h1>
+  <div class="who">
+    <label>Oda <input id="room" value="yurt-a" autocomplete="off"></label>
+    <label>Sen <input id="seller" value="pelin" autocomplete="off"></label>
+  </div>
+</header>
+
+<main>
+  <section aria-labelledby="sell-h">
+    <div class="panel">
+      <h2 id="sell-h">İlan ver</h2>
+      <p class="hint">Fotoğraf yükle, yapay zekâ başlığı, kategoriyi, açıklamayı ve fiyatı önersin. Yanlış olanı düzelt.</p>
+
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" aria-controls="photo-form" id="tab-photo">Fotoğraftan</button>
+        <button role="tab" aria-selected="false" aria-controls="manual-form" id="tab-manual">Elle</button>
+      </div>
+
+      <!-- Fotoğraftan: Adapter -> Builder (from_ai_draft) -> Chain -> State -->
+      <form id="photo-form" role="tabpanel" aria-labelledby="tab-photo">
+        <label class="drop" id="drop">
+          <input type="file" id="photo" accept="image/*" aria-label="Ürün fotoğrafı">
+          <span id="drop-text">Fotoğrafı buraya sürükle ya da seçmek için tıkla</span>
+        </label>
+        <div class="draft-box" id="draft-box" hidden></div>
+        <div class="row">
+          <label class="field">Başlık <span class="opt">boşsa öneri kullanılır</span><input id="p-title"></label>
+          <label class="field">Fiyat (₺) <span class="opt">boşsa öneri kullanılır</span><input id="p-price" inputmode="decimal"></label>
+        </div>
+        <label class="field">Kategori
+          <select id="p-category">
+            <option value="">Yapay zekâ seçsin</option>
+            <option value="elektronik">Elektronik</option>
+            <option value="mobilya">Mobilya</option>
+            <option value="kitap">Kitap</option>
+            <option value="giyim">Giyim</option>
+            <option value="mutfak">Mutfak</option>
+            <option value="diger">Diğer</option>
+          </select>
+        </label>
+        <label class="field">Açıklama <span class="opt">boşsa öneri kullanılır</span><textarea id="p-desc"></textarea></label>
+        <button class="btn" id="p-submit" type="submit">Yayınla</button>
+      </form>
+
+      <!-- Elle: Builder (from_form) -> Chain -> State -->
+      <form id="manual-form" role="tabpanel" aria-labelledby="tab-manual" hidden>
+        <label class="field">Başlık<input id="m-title" placeholder="Roman seti"></label>
+        <div class="row">
+          <label class="field">Fiyat (₺)<input id="m-price" inputmode="decimal" placeholder="90"></label>
+          <label class="field">Kategori
+            <select id="m-category">
+              <option value="elektronik">Elektronik</option>
+              <option value="mobilya">Mobilya</option>
+              <option value="kitap" selected>Kitap</option>
+              <option value="giyim">Giyim</option>
+              <option value="mutfak">Mutfak</option>
+              <option value="diger">Diğer</option>
+            </select>
+          </label>
+        </div>
+        <label class="field">Açıklama <span class="opt">isteğe bağlı</span><textarea id="m-desc"></textarea></label>
+        <label class="drop" id="m-drop">
+          <input type="file" id="m-file" accept="image/*" aria-label="Ürün fotoğrafı">
+          <span id="m-drop-text">Fotoğrafı buraya sürükle ya da seçmek için tıkla</span>
+        </label>
+        <button class="btn" id="m-submit" type="submit">Yayınla</button>
+      </form>
+
+      <div class="log" aria-live="polite">
+        <h3>Ne oldu?</h3>
+        <ol id="log"><li class="empty">Bir ilan verdiğinde ya da durumunu değiştirdiğinde, hangi kalıbın ne yaptığı burada görünür.</li></ol>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="board-h">
+    <div class="board-head">
+      <h2 id="board-h">Odadaki ilanlar</h2>
+      <button class="btn ghost" id="refresh" type="button">Yenile</button>
+    </div>
+    <div id="board"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const STATUS_LABEL = { taslak: "Taslak", aktif: "Aktif", rezerve: "Rezerve", satildi: "Satıldı" };
+const CATEGORY_LABEL = { elektronik: "Elektronik", mobilya: "Mobilya", kitap: "Kitap", giyim: "Giyim", mutfak: "Mutfak", diger: "Diğer" };
+const ACTIONS = [
+  { path: "reserve", label: "Rezerve et" },
+  { path: "cancel-reservation", label: "Rezervasyonu iptal et" },
+  { path: "sold", label: "Satıldı" },
+];
+let lastStatus = {};   // kapı askısı yalnızca durumu değişen kartta sallansın
+
+// --- Oda ve kullanıcı tarayıcıda hatırlansın ----------------------------------------
+for (const id of ["room", "seller"]) {
+  try { const v = localStorage.getItem("nearswap-" + id); if (v) $(id).value = v; } catch (_) {}
+  $(id).addEventListener("change", () => {
+    try { localStorage.setItem("nearswap-" + id, $(id).value.trim()); } catch (_) {}
+    if (id === "room") loadBoard();
+  });
+}
+
+// --- Yardımcılar ------------------------------------------------------------------
+function toast(text, bad = false) {
+  const t = $("toast"); t.textContent = text; t.className = "toast" + (bad ? " bad" : ""); t.hidden = false;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.hidden = true), 4200);
+}
+
+function log(pattern, text, bad = false) {
+  const list = $("log"); list.querySelector(".empty")?.remove();
+  const li = document.createElement("li"); if (bad) li.className = "bad";
+  const p = document.createElement("span"); p.className = "pattern"; p.textContent = pattern;
+  li.append(p, document.createTextNode(text)); list.prepend(li);
+}
+
+function money(v) { return Number(v).toLocaleString("tr-TR") + " ₺"; }
+
+// Sunucu, yapay zekânın geçici hatalarında isteği birkaç kez tekrar dener; fotoğraftan ilan
+// verirken taslak ve denetim için iki çağrı yapılır. Sayfa bu süreyi bekleyebilmeli.
+const REQUEST_TIMEOUT_MS = 200000;
+
+async function call(method, url, body) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const opts = { method, signal: controller.signal };
+  if (body instanceof FormData) opts.body = body;
+  else if (body) { opts.body = JSON.stringify(body); opts.headers = { "content-type": "application/json" }; }
+  try {
+    const res = await fetch(url, opts);
+    let data = null; try { data = await res.json(); } catch (_) {}
+    return { ok: res.ok, status: res.status, data };
+  } catch (err) {
+    const detail = err.name === "AbortError"
+      ? "Sunucu çok uzun süre yanıt vermedi. Terminal'deki sunucu çıktısına bak."
+      : "Sunucuya ulaşılamadı. Terminal'de sunucunun çalıştığından emin ol.";
+    return { ok: false, status: 0, data: { detail } };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Sunucunun hata yanıtını hangi kalıbın verdiğine göre açıklar.
+function explainError(r) {
+  const d = r.data || {};
+  if (d.error === "gecersiz_ilan") {
+    log("Builder", "İlan oluşturulmadı: " + d.problems.join(" "), true);
+    return d.problems.join(" ");
+  }
+  if (d.error === "denetim_reddi") {
+    log("Chain of Responsibility", `${d.checked_by} reddetti: ${d.reason}`, true);
+    return d.reason;
+  }
+  if (d.error === "gecersiz_islem") { log("State", d.detail, true); return d.detail; }
+  if (r.status === 503) { log("Adapter", d.detail, true); return d.detail; }
+  if (r.status === 0) { log("Sunucu", d.detail, true); return d.detail; }
+  const msg = d.detail ? (typeof d.detail === "string" ? d.detail : "Formdaki alanları kontrol et.") : "Beklenmeyen bir hata oluştu.";
+  log("Sunucu", msg, true); return msg;
+}
+
+function logPublished(listing, fromPhoto) {
+  if (fromPhoto) log("Adapter", "Yapay zekâ fotoğraftan taslak üretti.");
+  log("Builder", `${fromPhoto ? "Taslaktan" : "Formdan"} ilan kuruldu (taslak durumunda).`);
+  log("Chain of Responsibility", "Yasaklı kelime, fiyat ve yapay zekâ denetiminden geçti.");
+  log("State", `"${listing.title}" taslak → aktif.`);
+}
+
+// --- Sekmeler ----------------------------------------------------------------------
+for (const [tab, form, other, otherForm] of [["tab-photo", "photo-form", "tab-manual", "manual-form"], ["tab-manual", "manual-form", "tab-photo", "photo-form"]]) {
+  $(tab).addEventListener("click", () => {
+    $(tab).setAttribute("aria-selected", "true"); $(other).setAttribute("aria-selected", "false");
+    $(form).hidden = false; $(otherForm).hidden = true;
+  });
+}
+
+// --- Fotoğraf seçimi ve yapay zekâ önerisi ---------------------------------------------
+const drop = $("drop");
+for (const zone of [drop, $("m-drop")]) {
+  ["dragenter", "dragover"].forEach((e) => zone.addEventListener(e, () => zone.classList.add("over")));
+  ["dragleave", "drop"].forEach((e) => zone.addEventListener(e, () => zone.classList.remove("over")));
+}
+const DROP_TEXT = "Fotoğrafı buraya sürükle ya da seçmek için tıkla";
+
+function showPreview(zone, textEl, file) {
+  zone.querySelector("img")?.remove();
+  textEl.textContent = "";
+  const img = document.createElement("img"); img.alt = "Seçilen fotoğraf"; img.src = URL.createObjectURL(file);
+  zone.append(img);
+}
+
+function clearPreview(zone, textEl) {
+  zone.querySelector("img")?.remove();
+  textEl.textContent = DROP_TEXT;
+}
+
+$("m-file").addEventListener("change", () => {
+  const file = $("m-file").files[0];
+  if (file) showPreview($("m-drop"), $("m-drop-text"), file);
+});
+
+$("photo").addEventListener("change", async () => {
+  const file = $("photo").files[0]; if (!file) return;
+  showPreview(drop, $("drop-text"), file);
+
+  for (const id of ["p-title", "p-price", "p-desc"]) $(id).value = "";
+  $("p-category").value = "";
+  const box = $("draft-box"); box.hidden = false;
+  const started = Date.now();
+  const tick = () => (box.textContent = `Yapay zekâ fotoğrafa bakıyor… ${Math.round((Date.now() - started) / 1000)} sn`);
+  tick(); const ticker = setInterval(tick, 1000);
+  const fd = new FormData(); fd.append("photo", file);
+  const r = await call("POST", "/ai/draft", fd);
+  clearInterval(ticker);
+  if (!r.ok) { box.textContent = explainError(r); return; }
+  const d = r.data;
+  box.replaceChildren();
+  const b = document.createElement("b"); b.textContent = `Öneri: ${d.title} · ${money(d.suggested_price)}`;
+  const s = document.createElement("span"); s.textContent = `${CATEGORY_LABEL[d.category] || d.category}. ${d.description}`;
+  box.append(b, s);
+  // Öneriyi forma koy; kullanıcı yanlış olanı düzeltir, yayınlanan ilan ekranda görünenle aynı olur.
+  $("p-title").value = d.title;
+  if (Number(d.suggested_price) > 0) $("p-price").value = String(d.suggested_price);
+  $("p-category").value = d.category;
+  $("p-desc").value = d.description;
+  log("Adapter", `Taslak önerisi geldi: ${d.title} (${CATEGORY_LABEL[d.category] || d.category}). Yanlış olan alanı düzeltebilirsin.`);
+});
+
+$("photo-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const file = $("photo").files[0];
+  if (!file) { toast("Önce bir ürün fotoğrafı seç.", true); return; }
+  const fd = new FormData();
+  fd.append("photo", file); fd.append("room_id", $("room").value.trim()); fd.append("seller_id", $("seller").value.trim());
+  if ($("p-title").value.trim()) fd.append("title", $("p-title").value.trim());
+  if ($("p-price").value.trim()) fd.append("price", $("p-price").value.trim().replace(",", "."));
+  if ($("p-category").value) fd.append("category", $("p-category").value);
+  if ($("p-desc").value.trim()) fd.append("description", $("p-desc").value.trim());
+  const btn = $("p-submit"); btn.disabled = true; btn.textContent = "Yayınlanıyor…";
+  const r = await call("POST", "/listings/from-photo", fd);
+  btn.disabled = false; btn.textContent = "Yayınla";
+  if (!r.ok) { toast(explainError(r), true); return; }
+  logPublished(r.data, true); toast("Yayınlandı: " + r.data.title);
+  e.target.reset(); $("draft-box").hidden = true; clearPreview(drop, $("drop-text"));
+  loadBoard();
+});
+
+$("manual-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("m-submit"); btn.disabled = true; btn.textContent = "Yayınlanıyor…";
+  const photoUrls = [];
+  const file = $("m-file").files[0];
+  if (file) {
+    const fd = new FormData(); fd.append("photo", file);
+    const up = await call("POST", "/photos", fd);
+    if (!up.ok) { btn.disabled = false; btn.textContent = "Yayınla"; toast(explainError(up), true); return; }
+    photoUrls.push(up.data.url);
+  }
+  const body = {
+    room_id: $("room").value.trim(), seller_id: $("seller").value.trim(),
+    title: $("m-title").value, price: $("m-price").value.trim().replace(",", ".") || "0",
+    category: $("m-category").value, description: $("m-desc").value,
+    photo_urls: photoUrls,
+  };
+  const r = await call("POST", "/listings", body);
+  btn.disabled = false; btn.textContent = "Yayınla";
+  if (!r.ok) { toast(explainError(r), true); return; }
+  logPublished(r.data, false); toast("Yayınlandı: " + r.data.title);
+  e.target.reset(); clearPreview($("m-drop"), $("m-drop-text"));
+  loadBoard();
+});
+
+// --- İlan panosu ------------------------------------------------------------------
+function card(l) {
+  const el = document.createElement("article"); el.className = "card" + (l.status === "satildi" ? " is-sold" : "");
+
+  const hanger = document.createElement("div"); hanger.className = "hanger " + l.status;
+  hanger.textContent = STATUS_LABEL[l.status] || l.status;
+  if (lastStatus[l.listing_id] && lastStatus[l.listing_id] !== l.status) hanger.classList.add("swing");
+  lastStatus[l.listing_id] = l.status;
+
+  const photo = document.createElement("div"); photo.className = "photo";
+  const url = l.photos[0];
+  if (url) {
+    const probe = new Image();
+    probe.onload = () => (photo.style.backgroundImage = `url("${url}")`);
+    probe.onerror = () => (photo.textContent = "Fotoğraf yüklenemedi");
+    probe.src = url;
+  } else photo.textContent = "Fotoğraf yok";
+
+  const body = document.createElement("div"); body.className = "body";
+  const title = document.createElement("h3"); title.className = "title"; title.textContent = l.title;
+  const price = document.createElement("div"); price.className = "price"; price.textContent = money(l.price);
+  const meta = document.createElement("div"); meta.className = "meta";
+  meta.textContent = `${CATEGORY_LABEL[l.category] || l.category}, satıcı: ${l.seller_id}`;
+  body.append(title, price, meta);
+  if (l.description) { const d = document.createElement("p"); d.className = "desc"; d.textContent = l.description; body.append(d); }
+
+  // Bütün işlemler her zaman gösterilir: hangisinin geçerli olduğuna sunucudaki State karar verir.
+  const actions = document.createElement("div"); actions.className = "actions";
+  for (const a of ACTIONS) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = a.label;
+    b.addEventListener("click", () => changeState(l, a));
+    actions.append(b);
+  }
+  body.append(actions);
+
+  el.append(photo, body, hanger);
+  return el;
+}
+
+async function changeState(l, action) {
+  const r = await call("POST", `/listings/${l.listing_id}/${action.path}`);
+  if (!r.ok) { toast(explainError(r), true); return; }
+  log("State", `"${l.title}" ${STATUS_LABEL[l.status].toLowerCase()} → ${STATUS_LABEL[r.data.status].toLowerCase()}.`);
+  loadBoard();
+}
+
+async function loadBoard() {
+  const room = $("room").value.trim() || "yurt-a";
+  $("board-h").textContent = `${room} odasındaki ilanlar`;
+  const r = await call("GET", `/rooms/${encodeURIComponent(room)}/listings`);
+  const board = $("board"); board.replaceChildren();
+  if (!r.ok) { board.textContent = "İlanlar yüklenemedi. Sunucunun çalıştığından emin ol."; return; }
+  if (r.data.length === 0) {
+    const e = document.createElement("div"); e.className = "empty-board";
+    e.textContent = "Bu odada henüz ilan yok. Soldaki formdan ilk ilanı sen ver.";
+    board.append(e); return;
+  }
+  const grid = document.createElement("div"); grid.className = "grid";
+  r.data.slice().reverse().forEach((l) => grid.append(card(l)));
+  board.append(grid);
+}
+
+$("refresh").addEventListener("click", loadBoard);
+loadBoard();
+</script>
+</body>
+</html>

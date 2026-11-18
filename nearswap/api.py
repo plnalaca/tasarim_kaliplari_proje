@@ -1,20 +1,29 @@
-"""FastAPI arayüzü. Yalnızca ListingService'i çağırır; kalıplar bu dosyadan bağımsızdır.
+"""HTTP arayüzü (FastAPI) ve kullanıcı arayüzü sayfası.
 
-Çalıştırma:  uvicorn nearswap.api:app --reload   ->  http://127.0.0.1:8000/docs
+Bu katman yalnızca ListingService'i çağırır; tasarım kalıpları çatıdan bağımsız modüllerdedir
+(builder, ai, states, moderation). Servis, çatının bağımlılık enjeksiyonu yerine create_app()
+içinde açıkça verilir; böylece testler kendi servislerini doğrudan geçebilir.
 
-Not: Servis, FastAPI `Depends` ile değil, create_app() içinde doğrudan verilir. Ders kurallarına
-göre çatının hazır mekanizmaları kalıp sayılmıyor; kalıpların hepsi çatı dışındaki modüllerde.
+Çalıştırma:  uvicorn nearswap.api:app --reload
+    http://127.0.0.1:8000/       kullanıcı arayüzü
+    http://127.0.0.1:8000/docs   uç noktaların belgesi
 """
 
 from __future__ import annotations
 
+import logging
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from decimal import Decimal
+from pathlib import Path
 from typing import Annotated
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from nearswap.ai import create_ai_service
 from nearswap.builder import ListingDirector, StandardListingBuilder
@@ -26,11 +35,15 @@ from nearswap.models import (
     ListingNotFoundError,
     ListingValidationError,
     ModerationRejectedError,
+    NearSwapError,
 )
 from nearswap.moderation import build_default_chain
 from nearswap.service import ListingService
+from nearswap.storage import JsonFileStore
 
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
+INDEX_PAGE = Path(__file__).parent / "static" / "index.html"
+logger = logging.getLogger("uvicorn.error")  # uvicorn'un Terminal çıktısına yazar
 
 
 # --- İstek / yanıt şemaları ---------------------------------------------------------------
@@ -72,6 +85,10 @@ class ListingOut(BaseModel):
         )
 
 
+class PhotoOut(BaseModel):
+    url: str
+
+
 class DraftOut(BaseModel):
     title: str
     category: Category
@@ -94,7 +111,29 @@ class DraftOut(BaseModel):
 def create_default_service() -> ListingService:
     load_dotenv()
     ai = create_ai_service()
-    return ListingService(ai, build_default_chain(ai), ListingDirector(StandardListingBuilder()))
+    store = JsonFileStore(os.getenv("NEARSWAP_DATA_DIR") or "data")
+    return ListingService(ai, build_default_chain(ai), ListingDirector(StandardListingBuilder()), store)
+
+
+@contextmanager
+def _ai_errors() -> Iterator[None]:
+    """Yapay zekâ servisi hata verirse (ağ, kota, geçici yoğunluk, okunamayan yanıt) 503 döner.
+
+    Alan hataları (NearSwapError) kendi eşlemeleriyle (422, 409, 404) dönmeye devam eder.
+    """
+    try:
+        yield
+    except NearSwapError:
+        raise
+    except Exception as exc:
+        logger.exception("Yapay zekâ çağrısı başarısız oldu")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Yapay zekâ servisine şu an ulaşılamıyor ya da yanıtı okunamadı. "
+                f"Biraz sonra tekrar deneyin. ({type(exc).__name__})"
+            ),
+        ) from exc
 
 
 async def _read_photo(photo: UploadFile) -> tuple[bytes, str]:
@@ -140,11 +179,19 @@ def create_app(service: ListingService | None = None) -> FastAPI:
 
     # --- Uç noktalar -----------------------------------------------------------------
 
+    @app.get("/", include_in_schema=False)
+    def index() -> FileResponse:
+        """Kullanıcı arayüzü: ilan verme, oda panosu ve durum değiştirme tek sayfada."""
+        return FileResponse(INDEX_PAGE, media_type="text/html")
+
     @app.post("/ai/draft", response_model=DraftOut, tags=["yapay zekâ"])
     async def suggest_draft(photo: Annotated[UploadFile, File()]) -> DraftOut:
         """Fotoğraftan ilan taslağı önerir. İlan oluşturmaz."""
         data, mime_type = await _read_photo(photo)
-        return DraftOut.of(svc.suggest_draft(data, mime_type))
+        # Yapay zekâ çağrısı saniyeler sürebilir; ayrı iş parçacığında çalışır ki sunucu donmasın.
+        with _ai_errors():
+            draft = await run_in_threadpool(svc.suggest_draft, data, mime_type)
+        return DraftOut.of(draft)
 
     @app.post("/listings/from-photo", response_model=ListingOut, status_code=201, tags=["ilanlar"])
     async def create_from_photo(
@@ -153,26 +200,41 @@ def create_app(service: ListingService | None = None) -> FastAPI:
         seller_id: Annotated[str, Form()],
         title: Annotated[str | None, Form()] = None,
         price: Annotated[Decimal | None, Form()] = None,
+        category: Annotated[Category | None, Form()] = None,
+        description: Annotated[str | None, Form()] = None,
     ) -> ListingOut:
-        """Fotoğraftan yapay zekâ taslağıyla ilan verir. Başlık ve fiyat verilirse taslağın yerine geçer."""
+        """Fotoğraftan yapay zekâ taslağıyla ilan verir.
+
+        Başlık, fiyat, kategori ya da açıklama verilirse taslaktakinin yerine geçer.
+        """
         data, mime_type = await _read_photo(photo)
-        listing = svc.create_from_photo(
-            data, mime_type, room_id=room_id, seller_id=seller_id, title=title or None, price=price
-        )
+        with _ai_errors():
+            listing = await run_in_threadpool(
+                svc.create_from_photo,
+                data,
+                mime_type,
+                room_id=room_id,
+                seller_id=seller_id,
+                title=title or None,
+                price=price,
+                category=category,
+                description=description or None,
+            )
         return ListingOut.of(listing)
 
     @app.post("/listings", response_model=ListingOut, status_code=201, tags=["ilanlar"])
     def create_listing(body: ListingIn) -> ListingOut:
         """Elle doldurulan formdan ilan verir."""
-        listing = svc.create_from_form(
-            room_id=body.room_id,
-            seller_id=body.seller_id,
-            title=body.title,
-            price=body.price,
-            category=body.category,
-            description=body.description,
-            photo_urls=body.photo_urls,
-        )
+        with _ai_errors():  # denetim zincirinin son halkası yapay zekâyı çağırır
+            listing = svc.create_from_form(
+                room_id=body.room_id,
+                seller_id=body.seller_id,
+                title=body.title,
+                price=body.price,
+                category=body.category,
+                description=body.description,
+                photo_urls=body.photo_urls,
+            )
         return ListingOut.of(listing)
 
     @app.get("/rooms/{room_id}/listings", response_model=list[ListingOut], tags=["ilanlar"])
@@ -194,6 +256,12 @@ def create_app(service: ListingService | None = None) -> FastAPI:
     @app.post("/listings/{listing_id}/sold", response_model=ListingOut, tags=["durum"])
     def mark_sold(listing_id: str) -> ListingOut:
         return ListingOut.of(svc.mark_sold(listing_id))
+
+    @app.post("/photos", response_model=PhotoOut, status_code=201, tags=["fotoğraflar"])
+    async def upload_photo(photo: Annotated[UploadFile, File()]) -> PhotoOut:
+        """Fotoğrafı yükler ve adresini döner. Elle ilan verirken photo_urls içinde kullanılır."""
+        data, mime_type = await _read_photo(photo)
+        return PhotoOut(url=svc.save_photo(data, mime_type))
 
     @app.get("/photos/{photo_id}", tags=["fotoğraflar"])
     def get_photo(photo_id: str) -> Response:

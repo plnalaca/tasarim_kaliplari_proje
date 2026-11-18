@@ -5,7 +5,18 @@ import pytest
 from nearswap.builder import ListingBuilder, ListingDirector, StandardListingBuilder
 from nearswap.models import Category, ListingDraft, ListingValidationError
 from nearswap.states import DraftState
-from tests.helpers import make_listing
+
+def _valid_builder(title: str = "Çalışma lambası") -> StandardListingBuilder:
+    """Bütün zorunlu alanları dolu bir kurucu."""
+    return (
+        StandardListingBuilder()
+        .set_owner("yurt-a", "pelin")
+        .set_title(title)
+        .set_price(Decimal("150"))
+        .add_photo("https://ornek.com/lamba.jpg")
+        .set_category(Category.ELECTRONICS)
+    )
+
 
 DRAFT = ListingDraft(
     title="Kahve makinesi",
@@ -21,7 +32,7 @@ def test_builder_interface_is_abstract() -> None:
 
 
 def test_build_creates_listing_in_draft_state() -> None:
-    listing = make_listing()
+    listing = _valid_builder().build()
 
     assert isinstance(listing.state, DraftState)
     assert listing.title == "Çalışma lambası"
@@ -44,7 +55,7 @@ def test_build_collects_every_problem_at_once() -> None:
 
 def test_build_rejects_too_long_title() -> None:
     with pytest.raises(ListingValidationError) as exc:
-        make_listing(title="x" * 81)
+        _valid_builder(title="x" * 81).build()
     assert exc.value.problems == ["Başlık en fazla 80 karakter olabilir."]
 
 
@@ -107,3 +118,19 @@ def test_director_from_ai_draft_with_zero_price_requires_user_price() -> None:
             zero, photo_url="/photos/1", room_id="yurt-a", seller_id="pelin"
         )
     assert exc.value.problems == ["Fiyat sıfırdan büyük olmalı."]
+
+
+def test_director_from_ai_draft_lets_user_fix_category_and_description() -> None:
+    """Yapay zekâ hırkayı yanlış kategoriye koyarsa kullanıcı düzeltebilmeli."""
+    listing = ListingDirector(StandardListingBuilder()).from_ai_draft(
+        DRAFT,
+        photo_url="/photos/1",
+        room_id="yurt-a",
+        seller_id="pelin",
+        category=Category.CLOTHING,
+        description="Gri yün hırka, M beden.",
+    )
+
+    assert listing.category is Category.CLOTHING
+    assert listing.description == "Gri yün hırka, M beden."
+    assert listing.title == DRAFT.title  # verilmeyen alan taslaktan gelir

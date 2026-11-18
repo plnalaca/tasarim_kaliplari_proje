@@ -1,0 +1,16 @@
+# Gizli anahtarlar
+.env
+
+# Uygulamanın kaydettiği ilanlar ve fotoğraflar
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+
+# macOS
+.DS_Store

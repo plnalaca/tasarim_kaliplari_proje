@@ -24,6 +24,9 @@ dev = ["pytest>=8", "mypy>=1.10", "httpx>=0.27"]
 [tool.setuptools]
 packages = ["nearswap"]
 
+[tool.setuptools.package-data]
+nearswap = ["static/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
@@ -34,5 +37,5 @@ strict = true
 files = ["nearswap", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["openai.*", "google.*"]
+module = ["openai.*", "google.*", "dotenv.*"]
 ignore_missing_imports = true

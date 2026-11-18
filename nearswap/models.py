@@ -1,4 +1,9 @@
-"""Ortak alan modeli: ilan, kategori, yapay zekâ veri tipleri, hatalar ve metin yardımcısı."""
+"""Ortak alan modeli: ilan, kategori, yapay zekâ veri tipleri, hatalar ve Türkçe metin yardımcısı.
+
+Listing iki kalıpta rol alır:
+- Builder kalıbında **Product**: doğrudan değil, ListingBuilder.build() ile oluşturulur.
+- State kalıbında **Context**: durum işlemlerini o anki ListingState nesnesine devreder.
+"""
 
 from __future__ import annotations
 
@@ -42,8 +47,8 @@ class ModerationResult:
     checked_by: str | None = None
 
     @classmethod
-    def approve(cls) -> ModerationResult:
-        return cls(approved=True)
+    def approve(cls, checked_by: str | None = None) -> ModerationResult:
+        return cls(approved=True, checked_by=checked_by)
 
     @classmethod
     def reject(cls, reason: str, checked_by: str) -> ModerationResult:

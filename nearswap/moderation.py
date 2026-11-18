@@ -1,32 +1,31 @@
-"""Chain of Responsibility kalıbı: yayın öncesi ilan denetimi (Guardrail).
-
-Roller:
-    Handler          -> ModerationHandler
-    ConcreteHandler  -> BannedWordsHandler, PriceSanityHandler, AIModerationHandler
-    Client           -> service.ListingService
-
-Ucuz kontroller önce, yapay zekâ kontrolü en sonda çalışır; böylece gereksiz API çağrısı
-yapılmaz. Bir halka reddederse zincir durur ve reddetme sebebi döner. Yeni bir kontrol
-eklemek için yeni bir ModerationHandler yazıp zincire bağlamak yeterli.
-
-AIModerationHandler, yapay zekâya AIService (Adapter) üzerinden erişir.
+"""Chain of Responsibility kalıbı: yayın öncesi ilan denetimi (LLM literatüründeki Guardrail).
 """
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from decimal import Decimal
 
 from nearswap.ai import AIService
 from nearswap.models import Listing, ModerationResult, turkish_lower
 
-DEFAULT_BANNED_WORDS = frozenset(
-    {"silah", "tabanca", "uyuşturucu", "esrar", "alkol", "sigara", "reçeteli", "sahte"}
+DEFAULT_BANNED_WORDS: frozenset[str] = frozenset(
+    {"silah", "tabanca", "uyuşturucu", "esrar", "sahte kimlik", "sahte rapor", "kaçak"}
 )
+
 DEFAULT_MAX_PRICE = Decimal("50000")
 
 
 class ModerationHandler(ABC):
+    """Handler arayüzü.
+
+    Her ConcreteHandler handle() içinde kendi kontrolünü yapar:
+    - sorun bulursa ModerationResult.reject(...) döner (zincir durur),
+    - sorun yoksa self._pass_to_next(listing) döner.
+    """
+
     def __init__(self) -> None:
         self._next: ModerationHandler | None = None
 
@@ -36,8 +35,7 @@ class ModerationHandler(ABC):
         return handler
 
     @abstractmethod
-    def handle(self, listing: Listing) -> ModerationResult:
-        """Sorun bulursa ModerationResult.reject(...) döner, yoksa self._pass_to_next(listing)."""
+    def handle(self, listing: Listing) -> ModerationResult: ...
 
     def _pass_to_next(self, listing: Listing) -> ModerationResult:
         if self._next is None:
@@ -50,19 +48,34 @@ def _listing_text(listing: Listing) -> str:
 
 
 class BannedWordsHandler(ModerationHandler):
-    def __init__(self, banned_words: frozenset[str] = DEFAULT_BANNED_WORDS) -> None:
+    """Başlık ve açıklamada yasaklı kelime arar.
+
+    Karşılaştırma turkish_lower ile yapılır ("SİLAH" da yakalanır). Kelimenin başına ve
+    sonuna bakılır; böylece "esrar" yasaklıyken "esrarengiz bir tablo" reddedilmez.
+    """
+
+    def __init__(self, banned_words: Iterable[str] = DEFAULT_BANNED_WORDS) -> None:
         super().__init__()
-        self._banned_words = sorted(turkish_lower(w) for w in banned_words)
+        words = sorted({turkish_lower(w).strip() for w in banned_words if w.strip()})
+        self._patterns = [(w, re.compile(rf"(?<!\w){re.escape(w)}(?!\w)")) for w in words]
 
     def handle(self, listing: Listing) -> ModerationResult:
         text = turkish_lower(_listing_text(listing))
-        for word in self._banned_words:
-            if word in text:
-                return ModerationResult.reject(f"Yasaklı kelime: '{word}'", checked_by="BannedWordsHandler")
+        for word, pattern in self._patterns:
+            if pattern.search(text):
+                return ModerationResult.reject(
+                    f"Yasaklı kelime: '{word}'", checked_by=type(self).__name__
+                )
         return self._pass_to_next(listing)
 
 
 class PriceSanityHandler(ModerationHandler):
+    """Fiyatın makul olup olmadığını denetler.
+
+    Fiyatın 0'dan büyük olmasını Builder zorunlu tutar; burada üst sınır denetlenir.
+    Varsayılan üst sınır 50.000 TL.
+    """
+
     def __init__(self, max_price: Decimal = DEFAULT_MAX_PRICE) -> None:
         super().__init__()
         self._max_price = max_price
@@ -70,13 +83,19 @@ class PriceSanityHandler(ModerationHandler):
     def handle(self, listing: Listing) -> ModerationResult:
         if listing.price > self._max_price:
             return ModerationResult.reject(
-                f"Fiyat makul aralığın dışında (en fazla {self._max_price} TL).",
-                checked_by="PriceSanityHandler",
+                f"Fiyat üst sınırı aşıyor ({self._max_price} TL)",
+                checked_by=type(self).__name__,
             )
         return self._pass_to_next(listing)
 
 
 class AIModerationHandler(ModerationHandler):
+    """İlan metnini yapay zekâya denetletir. Zincirin SONUNDA durmalı.
+
+    Yapay zekâya yalnızca AIService (Adapter'ın Target arayüzü) üzerinden erişir; hangi
+    sağlayıcının kullanıldığını bilmez. Adapter ile Chain of Responsibility burada buluşur.
+    """
+
     def __init__(self, ai: AIService) -> None:
         super().__init__()
         self._ai = ai
@@ -85,14 +104,14 @@ class AIModerationHandler(ModerationHandler):
         result = self._ai.moderate(_listing_text(listing))
         if not result.approved:
             return ModerationResult.reject(
-                result.reason or "Yapay zekâ denetimi ilanı onaylamadı.",
-                checked_by="AIModerationHandler",
+                result.reason or "Yapay zekâ denetimi onaylamadı",
+                checked_by=type(self).__name__,
             )
         return self._pass_to_next(listing)
 
 
 def build_default_chain(ai: AIService) -> ModerationHandler:
-    """BannedWords -> PriceSanity -> AIModeration"""
+    """Varsayılan zinciri kurar ve başını döner."""
     head = BannedWordsHandler()
     head.set_next(PriceSanityHandler()).set_next(AIModerationHandler(ai))
     return head

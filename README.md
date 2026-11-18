@@ -1,40 +1,62 @@
-# NearSwap (EBLG443 Tasarım Kalıpları)
+# NearSwap
 
-Yurt ve siteler için yapay zekâ destekli ikinci el pazar yeri. Python + FastAPI.
-Ekip: Pelin ALACA, Handan VURAL. Ders: EBLG443, Dr. Ulaş Vural.
+Yurt ve siteler için yapay zekâ destekli ikinci el pazar yeri.
+EBLG443 Tasarım Kalıpları dönem projesi, İstanbul Nişantaşı Üniversitesi.
+
+| | |
+|---|---|
+| Ekip | Pelin ALACA (20222022383), Handan VURAL (20222022396) |
+| Dil | Python 3.11+, FastAPI |
+| Tasarım kalıpları | Builder, Adapter, State, Chain of Responsibility |
+| Yapay zekâ | Fotoğraftan ilan taslağı üretme, ilanı yayından önce denetleme (Gemini ya da OpenAI) |
+
+Tasarımın ayrıntılı anlatımı, sınıf diyagramları ve tasarım kararları için: **[docs/TASARIM.md](docs/TASARIM.md)**
+
+![NearSwap kullanıcı arayüzü: ilan verme formu, oda panosu ve "Ne oldu?" günlüğü](docs/demo.png)
+
+*Kullanıcı arayüzü. Kartların köşesindeki etiket ilanın durumunu gösterir; "Ne oldu?" günlüğü her işlemde hangi kalıbın çalıştığını yazar. Burada State kalıbı, aktif bir ilanda rezervasyon iptalini ve rezerve bir ilanı tekrar rezerve etmeyi reddediyor.*
+
+## Problem
+
+Yurtlarda ve sitelerde ikinci el eşyalar kalabalık WhatsApp gruplarında satılıyor. İlanlar mesaj akışında kayboluyor, fiyatı öğrenmek için satıcıya ayrıca yazmak gerekiyor ve satıcılar aynı ürünü tekrar tekrar paylaşıyor. NearSwap'ta ilanlar bir **odaya** (yurt, apartman, site) bağlıdır; satıcı fotoğraf yükler, yapay zekâ ilan taslağını önerir, ilan yayından önce otomatik olarak denetlenir ve alıcıyla kapıda buluşulur.
 
 ## Çalıştırma
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate                 # Windows: .venv\Scripts\activate
 pip install -e ".[dev,ai]"
 cp .env.example .env                      # Windows: copy .env.example .env
-uvicorn nearswap.api:app --reload
+uvicorn nearswap.api:app
 ```
 
-Tarayıcıda **http://127.0.0.1:8000/docs** adresini açın. Bütün uç noktalar oradan denenebilir.
+- **http://127.0.0.1:8000/**: kullanıcı arayüzü. İlan verme, oda panosu, durum değiştirme ve her işlemde hangi kalıbın çalıştığını gösteren "Ne oldu?" günlüğü.
+- **http://127.0.0.1:8000/docs**: bütün uç noktaların etkileşimli belgesi.
 
-Varsayılan sağlayıcı `fake`: API anahtarı gerekmez, her fotoğrafa sabit bir taslak döner.
-Gerçek yapay zekâ için `.env` içinde `NEARSWAP_AI_PROVIDER=openai` ya da `gemini` yapıp ilgili anahtarı girin.
+Varsayılan yapay zekâ sağlayıcısı `fake`'tir: API anahtarı gerektirmez ve her fotoğrafa sabit bir taslak döner. Gerçek yapay zekâ için `.env` içinde `NEARSWAP_AI_PROVIDER=gemini` (ya da `openai`) yapılır ve ilgili anahtar girilir.
 
 ```bash
-pytest     # 55 test
-mypy       # strict tip denetimi
+pytest                                    # 117 test, gerçek API'ye istek atmaz
+mypy                                      # strict tip denetimi
+python scripts/try_ai.py urun.jpg         # seçili sağlayıcıyı sunucu olmadan deneme
 ```
 
-## Dosyalar
+## Dosya yapısı
 
 ```
 nearswap/
-├── models.py       Listing, Category, ListingDraft, ModerationResult, hatalar, turkish_lower
-├── builder.py      Builder                  (Yaratımsal)
-├── ai.py           Adapter                  (Yapısal)
-├── states.py       State                    (Davranışsal)
-├── moderation.py   Chain of Responsibility  (Davranışsal)
-├── service.py      ListingService: dört kalıbı birbirine bağlar
-└── api.py          FastAPI uç noktaları
-tests/              her kalıp için ayrı dosya + uçtan uca API testi
+├── models.py         Listing, Category, ListingDraft, ModerationResult, hatalar, turkish_lower
+├── builder.py        Builder                   (yaratımsal)
+├── ai.py             Adapter                   (yapısal)
+├── states.py         State                     (davranışsal)
+├── moderation.py     Chain of Responsibility   (davranışsal)
+├── service.py        ListingService: kalıpları ilan verme akışında birleştirir
+├── storage.py        JsonFileStore: ilanları ve fotoğrafları diskte saklar
+├── api.py            FastAPI uç noktaları
+└── static/index.html kullanıcı arayüzü
+tests/                her modül için ayrı test dosyası
+scripts/try_ai.py     yapay zekâ sağlayıcısını elle deneme
+docs/TASARIM.md       tasarım belgesi
 ```
 
 ## Kalıplar ve roller
@@ -46,44 +68,57 @@ tests/              her kalıp için ayrı dosya + uçtan uca API testi
 | | ConcreteBuilder | `StandardListingBuilder` |
 | | Director | `ListingDirector` (`from_form`, `from_ai_draft`) |
 | **Adapter** | Target | `AIService` |
-| | Adaptee | OpenAI SDK, Google Gen AI SDK |
-| | Adapter | `OpenAIAdapter`, `GeminiAdapter` (+ test için `FakeAIAdapter`) |
+| | Adaptee | `openai.OpenAI`, `google.genai.Client` |
+| | Adapter | `OpenAIAdapter`, `GeminiAdapter` (testler için `FakeAIAdapter`) |
 | **State** | Context | `Listing` |
 | | State | `ListingState` |
 | | ConcreteState | `DraftState`, `ActiveState`, `ReservedState`, `SoldState` |
 | **Chain of Responsibility** | Handler | `ModerationHandler` |
-| | ConcreteHandler | `BannedWordsHandler`, `PriceSanityHandler`, `AIModerationHandler` |
+| | ConcreteHandler | `BannedWordsHandler` → `PriceSanityHandler` → `AIModerationHandler` |
 | | Client | `ListingService` |
+
+Bütün arayüzler `abc.ABC` ile tanımlıdır ve her rol ayrı bir sınıfla karşılanır. Kalıplar çatıdan bağımsızdır; FastAPI yalnızca dış katmandır.
 
 ## Fotoğraftan ilan verme akışı
 
 ```
 POST /listings/from-photo
-  │
-  ├─ AIService.draft_listing(photo)         Adapter      -> ListingDraft
-  ├─ ListingDirector.from_ai_draft(...)     Builder      -> Listing (taslak)
-  ├─ zincir.handle(listing)                 Chain        -> BannedWords → PriceSanity → AIModeration
-  └─ listing.publish()                      State        -> aktif
+  ├─ AIService.draft_listing(photo)         Adapter   -> ListingDraft
+  ├─ ListingDirector.from_ai_draft(...)     Builder   -> Listing (taslak)
+  ├─ zincir.handle(listing)                 Chain     -> BannedWords → PriceSanity → AIModeration
+  └─ listing.publish()                      State     -> aktif
 ```
 
 ## Uç noktalar
 
 | Yöntem | Yol | Ne yapar |
 |---|---|---|
+| GET | `/` | Kullanıcı arayüzü |
 | POST | `/ai/draft` | Fotoğraftan taslak önerir, ilan oluşturmaz |
-| POST | `/listings/from-photo` | Fotoğraf + oda + satıcı ile ilan verir (başlık ve fiyat isteğe bağlı) |
-| POST | `/listings` | Elle doldurulan formdan ilan verir |
+| POST | `/listings/from-photo` | Fotoğraftan ilan verir (başlık, fiyat, kategori, açıklama isteğe bağlı) |
+| POST | `/listings` | Formdan ilan verir |
 | GET | `/rooms/{room_id}/listings` | Odadaki ilanlar |
 | GET | `/listings/{id}` | Tek ilan |
 | POST | `/listings/{id}/reserve` | Rezerve et |
 | POST | `/listings/{id}/cancel-reservation` | Rezervasyonu iptal et |
 | POST | `/listings/{id}/sold` | Satıldı olarak işaretle |
+| POST | `/photos` | Fotoğraf yükler, adresini döner |
 | GET | `/photos/{id}` | Yüklenen fotoğraf |
 
-Hata kodları: eksik ya da hatalı ilan ve denetim reddi **422**, durumda izin verilmeyen işlem **409**, bulunamayan ilan **404**.
+Hata kodları: geçersiz ilan ve denetim reddi **422**, ilanın durumunda izin verilmeyen işlem **409**, bulunamayan ilan **404**, yapay zekâ servisine ulaşılamaması **503**.
 
-## Bilinen sınırlar
+## Yapılandırma (`.env`)
 
-- Veriler bellekte tutulur, sunucu yeniden başlayınca silinir.
-- Kullanıcı kaydı, oda üyeliği ve mesajlaşma yok. Oda yalnızca ilandaki `room_id` alanıdır.
-- `OpenAIAdapter` ve `GeminiAdapter` sahte istemcilerle test edildi. Gerçek anahtarla bir kez denenmeli; model adları `.env` içinden değiştirilebilir.
+| Değişken | Varsayılan | Açıklama |
+|---|---|---|
+| `NEARSWAP_AI_PROVIDER` | `fake` | `fake`, `gemini` ya da `openai` |
+| `GEMINI_API_KEY`, `OPENAI_API_KEY` | | Seçilen sağlayıcının anahtarı |
+| `NEARSWAP_GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model adı |
+| `NEARSWAP_OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model adı |
+| `NEARSWAP_DATA_DIR` | `data` | İlanların ve fotoğrafların saklandığı klasör |
+
+`.env` ve `data/` git'e eklenmez.
+
+## Kapsam
+
+Kullanıcı kaydı, oda üyeliği ve mesajlaşma bu sürümün kapsamı dışındadır; oda, ilandaki `room_id` alanıyla temsil edilir. Veriler JSON dosyalarında saklanır.

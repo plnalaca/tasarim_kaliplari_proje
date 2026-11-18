@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from nearswap.ai import FakeAIAdapter
 from nearswap.api import create_app
 from nearswap.builder import ListingDirector, StandardListingBuilder
+from nearswap.models import ListingDraft, ModerationResult
 from nearswap.moderation import build_default_chain
 from nearswap.service import ListingService
 
@@ -91,7 +92,7 @@ def test_invalid_listing_returns_all_problems(client: TestClient) -> None:
 
 
 def test_banned_word_is_rejected_and_not_saved(client: TestClient, ai: FakeAIAdapter) -> None:
-    response = client.post("/listings", json=_form_listing(description="Hediye olarak alkol de veririm"))
+    response = client.post("/listings", json=_form_listing(description="Yanında tabanca kılıfı da var"))
 
     assert response.status_code == 422
     assert response.json()["checked_by"] == "BannedWordsHandler"
@@ -117,3 +118,101 @@ def test_non_image_upload_is_rejected(client: TestClient) -> None:
 
 def test_unknown_listing_returns_404(client: TestClient) -> None:
     assert client.get("/listings/yok").status_code == 404
+
+
+class _BrokenAI(FakeAIAdapter):
+    """Sağlayıcı geçici olarak yanıt vermiyormuş gibi davranır (ör. Gemini 503)."""
+
+    def draft_listing(self, photo_bytes: bytes, mime_type: str) -> ListingDraft:
+        raise RuntimeError("503 UNAVAILABLE")
+
+    def moderate(self, text: str) -> ModerationResult:
+        raise RuntimeError("503 UNAVAILABLE")
+
+
+def test_ai_outage_returns_503_instead_of_crashing() -> None:
+    ai = _BrokenAI()
+    service = ListingService(ai, build_default_chain(ai), ListingDirector(StandardListingBuilder()))
+    client = TestClient(create_app(service))
+
+    assert client.post("/ai/draft", files={"photo": PHOTO}).status_code == 503
+    assert client.post("/listings", json=_form_listing()).status_code == 503
+
+
+def test_ai_draft_that_cannot_be_read_returns_503() -> None:
+    class _Unreadable(FakeAIAdapter):
+        def draft_listing(self, photo_bytes: bytes, mime_type: str) -> ListingDraft:
+            raise ValueError("Yanıt bir JSON nesnesi değil")
+
+    ai = _Unreadable()
+    service = ListingService(ai, build_default_chain(ai), ListingDirector(StandardListingBuilder()))
+    response = TestClient(create_app(service)).post(
+        "/listings/from-photo", files={"photo": PHOTO}, data={"room_id": "yurt-a", "seller_id": "pelin"}
+    )
+
+    assert response.status_code == 503
+
+
+def test_home_page_serves_the_user_interface(client: TestClient) -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "NearSwap" in response.text
+
+
+def test_from_photo_uses_category_and_description_chosen_by_user(client: TestClient) -> None:
+    response = client.post(
+        "/listings/from-photo",
+        files={"photo": PHOTO},
+        data={
+            "room_id": "yurt-a",
+            "seller_id": "pelin",
+            "title": "Gri hırka",
+            "category": "giyim",
+            "description": "M beden, bir kez giyildi.",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert (body["title"], body["category"], body["description"]) == (
+        "Gri hırka",
+        "giyim",
+        "M beden, bir kez giyildi.",
+    )
+
+
+def test_from_photo_rejects_unknown_category(client: TestClient) -> None:
+    response = client.post(
+        "/listings/from-photo",
+        files={"photo": PHOTO},
+        data={"room_id": "yurt-a", "seller_id": "pelin", "category": "uzay-gemisi"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_uploaded_photo_can_be_used_in_a_form_listing(client: TestClient) -> None:
+    uploaded = client.post("/photos", files={"photo": PHOTO})
+    assert uploaded.status_code == 201
+    url = uploaded.json()["url"]
+
+    created = client.post("/listings", json=_form_listing(photo_urls=[url]))
+
+    assert created.status_code == 201
+    assert client.get(created.json()["photos"][0]).content == PHOTO[1]
+
+
+def test_photo_upload_rejects_non_images(client: TestClient) -> None:
+    response = client.post("/photos", files={"photo": ("notlar.txt", b"merhaba", "text/plain")})
+    assert response.status_code == 415
+
+
+def test_ai_outage_message_names_the_error_type() -> None:
+    ai = _BrokenAI()
+    service = ListingService(ai, build_default_chain(ai), ListingDirector(StandardListingBuilder()))
+
+    response = TestClient(create_app(service)).post("/ai/draft", files={"photo": PHOTO})
+
+    assert "(RuntimeError)" in response.json()["detail"]

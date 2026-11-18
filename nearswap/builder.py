@@ -157,14 +157,20 @@ class ListingDirector:
         seller_id: str,
         title: str | None = None,
         price: Decimal | None = None,
+        category: Category | None = None,
+        description: str | None = None,
     ) -> Listing:
-        """Yapay zekâ taslağından başlar; kullanıcı başlığı ya da fiyatı verdiyse onları kullanır."""
+        """Yapay zekâ taslağından başlar; kullanıcının verdiği her alan taslaktakinin yerine geçer.
+
+        Yapay zekâ kategoriyi ya da açıklamayı yanlış tahmin edebilir; kullanıcı bunları da
+        düzeltebilir. Verilmeyen (None) alanlar taslaktan alınır.
+        """
         return (
             self._builder.reset()
             .set_owner(room_id, seller_id)
             .add_photo(photo_url)
-            .set_category(draft.category)
-            .set_description(draft.description)
+            .set_category(category if category is not None else draft.category)
+            .set_description(description if description is not None else draft.description)
             .set_title(title if title else draft.title)
             .set_price(price if price is not None else draft.suggested_price)
             .build()
