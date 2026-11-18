@@ -16,9 +16,6 @@ Tasarımın ayrıntılı anlatımı, sınıf diyagramları ve tasarım kararlar�
 
 *Kullanıcı arayüzü. Kartların köşesindeki etiket ilanın durumunu gösterir; "Ne oldu?" günlüğü her işlemde hangi kalıbın çalıştığını yazar. Burada State kalıbı, aktif bir ilanda rezervasyon iptalini ve rezerve bir ilanı tekrar rezerve etmeyi reddediyor.*
 
-## Problem
-
-Yurtlarda ve sitelerde ikinci el eşyalar kalabalık WhatsApp gruplarında satılıyor. İlanlar mesaj akışında kayboluyor, fiyatı öğrenmek için satıcıya ayrıca yazmak gerekiyor ve satıcılar aynı ürünü tekrar tekrar paylaşıyor. NearSwap'ta ilanlar bir **odaya** (yurt, apartman, site) bağlıdır; satıcı fotoğraf yükler, yapay zekâ ilan taslağını önerir, ilan yayından önce otomatik olarak denetlenir ve alıcıyla kapıda buluşulur.
 
 ## Çalıştırma
 

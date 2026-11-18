@@ -3,16 +3,7 @@
 EBLG443 Tasarım Kalıpları · Pelin ALACA (20222022383), Handan VURAL (20222022396)
 
 ## 1. Problem ve kapsam
-
-Yurtlarda ve sitelerde ikinci el eşyalar WhatsApp gruplarında satılıyor. Bir yurdun satış grubunda 367 kişi bulunuyor; bu kişilerden 20'siyle yapılan görüşmelerde üç sorun öne çıktı:
-
-- Mesaj akışında ilanları takip etmek zor.
-- Fiyatı öğrenmek için satıcıya ayrıca yazmak gerekiyor.
-- Satıcılar, ilanları görünürlüğünü kaybettiği için aynı ürünü tekrar tekrar paylaşıyor.
-
-Dolap ve Gardrops gibi uygulamalar ilanları düzenli tutuyor ama kargo ve komisyon gerektiriyor; aynı binada yaşayanlar için bu gereksiz.
-
-NearSwap'ta ilanlar bir **odaya** (yurt, apartman, site) bağlıdır. Satıcı ürünün fotoğrafını yükler, yapay zekâ başlık, kategori, açıklama ve fiyat önerir, satıcı bunları düzeltir. İlan yayına çıkmadan önce otomatik olarak denetlenir. İlan aktif, rezerve ve satıldı durumlarından geçer; alıcıyla kapıda buluşulur.
+Satıcı ürünün fotoğrafını yükler, yapay zekâ başlık, kategori, açıklama ve fiyat önerir, satıcı bunları düzeltir. İlan yayına çıkmadan önce otomatik olarak denetlenir. İlan aktif, rezerve ve satıldı durumlarından geçer.
 
 **Bu sürümün kapsamı:** fotoğraftan ya da formdan ilan verme, yayın öncesi denetim, ilan durumunu yönetme, bir odanın ilanlarını listeleme. Kullanıcı kaydı, oda üyeliği ve mesajlaşma kapsam dışıdır. Öneri dokümanında yer alan bildirim özelliği ve onu karşılayacak Observer kalıbı, kapsamı daraltmak için bu sürüme alınmamıştır.
 
