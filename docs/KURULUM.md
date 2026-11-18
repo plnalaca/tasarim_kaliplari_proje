@@ -13,8 +13,8 @@ Sistem, Python 3.11 ya da daha yeni bir sürümle beş adımda kurulup çalışt
 1. Depoyu klonlayın ve klasöre girin:
 
    ```bash
-   git clone https://github.com/plnalaca/tasarim_kaliplar-_proje.git
-   cd tasarim_kaliplar-_proje
+   git clone https://github.com/plnalaca/tasarim_kaliplari_proje.git
+   cd tasarim_kaliplari_proje
    ```
 
 2. Sanal ortamı oluşturup etkinleştirin:
