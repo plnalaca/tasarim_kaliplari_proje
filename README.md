@@ -1,71 +1,89 @@
 # NearSwap (EBLG443 Tasarım Kalıpları)
 
-Yurt ve siteler için yapay zekâ destekli ikinci el pazar yerinin **Python çekirdeği**.
+Yurt ve siteler için yapay zekâ destekli ikinci el pazar yeri. Python + FastAPI.
 Ekip: Pelin ALACA, Handan VURAL. Ders: EBLG443, Dr. Ulaş Vural.
 
-## Kurulum
+## Çalıştırma
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"            # gerçek AI uyarlayıcıları için: pip install -e ".[dev,ai]"
-cp .env.example .env               # anahtarları .env içine yazın
+source .venv/bin/activate                 # Windows: .venv\Scripts\activate
+pip install -e ".[dev,ai]"
+cp .env.example .env                      # Windows: copy .env.example .env
+uvicorn nearswap.api:app --reload
 ```
 
-## Komutlar
+Tarayıcıda **http://127.0.0.1:8000/docs** adresini açın. Bütün uç noktalar oradan denenebilir.
+
+Varsayılan sağlayıcı `fake`: API anahtarı gerekmez, her fotoğrafa sabit bir taslak döner.
+Gerçek yapay zekâ için `.env` içinde `NEARSWAP_AI_PROVIDER=openai` ya da `gemini` yapıp ilgili anahtarı girin.
 
 ```bash
-pytest          # testler
-mypy            # tip denetimi (strict)
+pytest     # 55 test
+mypy       # strict tip denetimi
 ```
 
-Bir değişikliği göndermeden önce ikisi de temiz geçmeli.
-
-## Klasör yapısı
+## Dosyalar
 
 ```
 nearswap/
-├── domain/        Listing, Room, User, Category, ortak veri tipleri, hatalar
-├── patterns/
-│   ├── builder/     Builder                  (Yaratımsal)
-│   ├── adapter/     Adapter                  (Yapısal)
-│   ├── state/       State                    (Davranışsal)
-│   ├── observer/    Observer                 (Davranışsal)
-│   └── moderation/  Chain of Responsibility  (Davranışsal)
-├── services/      Kalıpları birbirine bağlayan akışlar (ilan verme)
-└── api/           (isteğe bağlı) FastAPI ya da komut satırı
-tests/             pytest testleri
+├── models.py       Listing, Category, ListingDraft, ModerationResult, hatalar, turkish_lower
+├── builder.py      Builder                  (Yaratımsal)
+├── ai.py           Adapter                  (Yapısal)
+├── states.py       State                    (Davranışsal)
+├── moderation.py   Chain of Responsibility  (Davranışsal)
+├── service.py      ListingService: dört kalıbı birbirine bağlar
+└── api.py          FastAPI uç noktaları
+tests/              her kalıp için ayrı dosya + uçtan uca API testi
 ```
 
-Her kalıp klasörünün `__init__.py` dosyasında rollerin hangi sınıflarla karşılandığı yazıyor.
+## Kalıplar ve roller
 
-## Kalıp rolleri ve durum
+| Kalıp | Rol | Sınıf |
+|---|---|---|
+| **Builder** | Product | `Listing` |
+| | Builder | `ListingBuilder` |
+| | ConcreteBuilder | `StandardListingBuilder` |
+| | Director | `ListingDirector` (`from_form`, `from_ai_draft`) |
+| **Adapter** | Target | `AIService` |
+| | Adaptee | OpenAI SDK, Google Gen AI SDK |
+| | Adapter | `OpenAIAdapter`, `GeminiAdapter` (+ test için `FakeAIAdapter`) |
+| **State** | Context | `Listing` |
+| | State | `ListingState` |
+| | ConcreteState | `DraftState`, `ActiveState`, `ReservedState`, `SoldState` |
+| **Chain of Responsibility** | Handler | `ModerationHandler` |
+| | ConcreteHandler | `BannedWordsHandler`, `PriceSanityHandler`, `AIModerationHandler` |
+| | Client | `ListingService` |
 
-| Kalıp | Arayüz (hazır) | Somut sınıflar | Kim |
-|---|---|---|---|
-| Builder | `ListingBuilder` | `StandardListingBuilder`, `ListingDirector` | Pelin |
-| State | `ListingState` | `DraftState`, `ActiveState`, `ReservedState`, `SoldState` | Pelin |
-| Adapter | `AIService` | `OpenAIAdapter`, `GeminiAdapter` (+ hazır `FakeAIAdapter`) | Handan |
-| Observer | `ListingEventPublisher`, `ListingObserver` | `Room`, `InAppNotifier`, `EmailNotifier`, `ActivityLogObserver` | Handan |
-| Chain of Resp. | `ModerationHandler` | `BannedWordsHandler`, `PriceSanityHandler`, `AIModerationHandler` | Handan |
-| İlan verme akışı | | `ListingPublishService` | Birlikte |
+## Fotoğraftan ilan verme akışı
 
-Yapılacaklar kodda `TODO(Pelin)`, `TODO(Handan)` ve `TODO(birlikte)` ile işaretli.
+```
+POST /listings/from-photo
+  │
+  ├─ AIService.draft_listing(photo)         Adapter      -> ListingDraft
+  ├─ ListingDirector.from_ai_draft(...)     Builder      -> Listing (taslak)
+  ├─ zincir.handle(listing)                 Chain        -> BannedWords → PriceSanity → AIModeration
+  └─ listing.publish()                      State        -> aktif
+```
 
-## İskelette alınan kararlar
+## Uç noktalar
 
-Rehber dosyasında açık kalan noktalar için şimdilik şu kararlar uygulandı. Gerekirse değiştirilir.
+| Yöntem | Yol | Ne yapar |
+|---|---|---|
+| POST | `/ai/draft` | Fotoğraftan taslak önerir, ilan oluşturmaz |
+| POST | `/listings/from-photo` | Fotoğraf + oda + satıcı ile ilan verir (başlık ve fiyat isteğe bağlı) |
+| POST | `/listings` | Elle doldurulan formdan ilan verir |
+| GET | `/rooms/{room_id}/listings` | Odadaki ilanlar |
+| GET | `/listings/{id}` | Tek ilan |
+| POST | `/listings/{id}/reserve` | Rezerve et |
+| POST | `/listings/{id}/cancel-reservation` | Rezervasyonu iptal et |
+| POST | `/listings/{id}/sold` | Satıldı olarak işaretle |
+| GET | `/photos/{id}` | Yüklenen fotoğraf |
 
-1. **`DraftState` eklendi.** Builder'ın oluşturduğu ilan önce Taslak durumunda olur, denetimden geçince `publish()` ile Aktif'e geçer. Geçiş tablosu `patterns/state/__init__.py` içinde.
-2. **Fiyat `Decimal` tipinde.** Para hesaplarında `float` yuvarlama hatası yapar.
-3. **Observer'da Subject `Room`.** `Listing` zaten Product ve Context rollerini taşıyor.
-4. **Builder ile zincirin görevi ayrıldı.** `build()` yapısal kuralları denetler, zincir içerik politikasını. `RequiredFieldsHandler` bu yüzden iskelete konmadı (bkz. `patterns/moderation/handlers.py`).
-5. **Türkçe metin karşılaştırması için `turkish_lower` kullanılmalı.** Python'un `lower()` ve `casefold()` işlevleri İ/I harflerini yanlış çevirir.
+Hata kodları: eksik ya da hatalı ilan ve denetim reddi **422**, durumda izin verilmeyen işlem **409**, bulunamayan ilan **404**.
 
-## Kurallar (özet)
+## Bilinen sınırlar
 
-- Arayüzler `abc.ABC` ile yazılır. Her rol ayrı ve anlamlı adlandırılmış bir sınıftır.
-- Lambda gibi dile gömülü kısayollar kalıp yerine kullanılmaz.
-- blinker, Django signals, middleware, FastAPI `Depends` gibi hazır yapılar kalıp yerine kullanılmaz.
-- Yapay zekâya her zaman `AIService` üzerinden erişilir. Testler `FakeAIAdapter` kullanır, gerçek API'ye istek atmaz.
-- API anahtarları koda yazılmaz, `.env` dosyasından okunur.
+- Veriler bellekte tutulur, sunucu yeniden başlayınca silinir.
+- Kullanıcı kaydı, oda üyeliği ve mesajlaşma yok. Oda yalnızca ilandaki `room_id` alanıdır.
+- `OpenAIAdapter` ve `GeminiAdapter` sahte istemcilerle test edildi. Gerçek anahtarla bir kez denenmeli; model adları `.env` içinden değiştirilebilir.
