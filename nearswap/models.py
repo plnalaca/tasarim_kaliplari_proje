@@ -92,6 +92,14 @@ class ListingNotFoundError(NearSwapError):
         super().__init__(f"'{listing_id}' numaralı ilan bulunamadı.")
 
 
+class DraftNotFoundError(NearSwapError):
+    """Yayınlanmak istenen taslak sunucuda yok (süresi doldu ya da sunucu yeniden başladı)."""
+
+    def __init__(self, draft_id: str) -> None:
+        super().__init__("Taslak bulunamadı. Fotoğrafı yeniden seçin.")
+        self.draft_id = draft_id
+
+
 # --- Metin yardımcısı ---------------------------------------------------------------------
 
 _TR_UPPER_TO_LOWER = str.maketrans({"İ": "i", "I": "ı"})

@@ -252,6 +252,7 @@ const ACTIONS = [
   { path: "sold", label: "Satıldı" },
 ];
 let lastStatus = {};   // kapı askısı yalnızca durumu değişen kartta sallansın
+let draftId = null;    // fotoğraf seçilirken üretilen taslak; yayınlarken yapay zekâ ikinci kez çağrılmaz
 
 // --- Oda ve kullanıcı tarayıcıda hatırlansın ----------------------------------------
 for (const id of ["room", "seller"]) {
@@ -319,8 +320,9 @@ function explainError(r) {
   log("Sunucu", msg, true); return msg;
 }
 
-function logPublished(listing, fromPhoto) {
-  if (fromPhoto) log("Adapter", "Yapay zekâ fotoğraftan taslak üretti.");
+function logPublished(listing, fromPhoto, reusedDraft = false) {
+  if (reusedDraft) log("Adapter", "Fotoğraf seçilirken üretilen taslak kullanıldı; yapay zekâ yalnızca denetim için çağrıldı.");
+  else if (fromPhoto) log("Adapter", "Yapay zekâ fotoğraftan taslak üretti.");
   log("Builder", `${fromPhoto ? "Taslaktan" : "Formdan"} ilan kuruldu (taslak durumunda).`);
   log("Chain of Responsibility", "Yasaklı kelime, fiyat ve yapay zekâ denetiminden geçti.");
   log("State", `"${listing.title}" taslak → aktif.`);
@@ -363,6 +365,7 @@ $("photo").addEventListener("change", async () => {
   const file = $("photo").files[0]; if (!file) return;
   showPreview(drop, $("drop-text"), file);
 
+  draftId = null;
   for (const id of ["p-title", "p-price", "p-desc"]) $(id).value = "";
   $("p-category").value = "";
   const box = $("draft-box"); box.hidden = false;
@@ -383,6 +386,7 @@ $("photo").addEventListener("change", async () => {
   if (Number(d.suggested_price) > 0) $("p-price").value = String(d.suggested_price);
   $("p-category").value = d.category;
   $("p-desc").value = d.description;
+  draftId = d.draft_id;
   log("Adapter", `Taslak önerisi geldi: ${d.title} (${CATEGORY_LABEL[d.category] || d.category}). Yanlış olan alanı düzeltebilirsin.`);
 });
 
@@ -390,17 +394,30 @@ $("photo-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const file = $("photo").files[0];
   if (!file) { toast("Önce bir ürün fotoğrafı seç.", true); return; }
-  const fd = new FormData();
-  fd.append("photo", file); fd.append("room_id", $("room").value.trim()); fd.append("seller_id", $("seller").value.trim());
-  if ($("p-title").value.trim()) fd.append("title", $("p-title").value.trim());
-  if ($("p-price").value.trim()) fd.append("price", $("p-price").value.trim().replace(",", "."));
-  if ($("p-category").value) fd.append("category", $("p-category").value);
-  if ($("p-desc").value.trim()) fd.append("description", $("p-desc").value.trim());
+  const fields = {
+    room_id: $("room").value.trim(), seller_id: $("seller").value.trim(),
+    title: $("p-title").value.trim() || null,
+    price: $("p-price").value.trim().replace(",", ".") || null,
+    category: $("p-category").value || null,
+    description: $("p-desc").value.trim() || null,
+  };
   const btn = $("p-submit"); btn.disabled = true; btn.textContent = "Yayınlanıyor…";
-  const r = await call("POST", "/listings/from-photo", fd);
+  let r = null, reused = false;
+  if (draftId) {
+    // Önerideki taslak sunucuda saklı: fotoğraf yeniden gönderilmez, taslak yeniden üretilmez.
+    r = await call("POST", "/listings/from-draft", { draft_id: draftId, ...fields });
+    reused = r.ok;
+    if (r.status === 404 && r.data && r.data.error === "taslak_bulunamadi") r = null;  // sunucu yeniden başladıysa
+  }
+  if (!r) {
+    const fd = new FormData(); fd.append("photo", file);
+    for (const [k, v] of Object.entries(fields)) if (v !== null) fd.append(k, v);
+    r = await call("POST", "/listings/from-photo", fd);
+  }
   btn.disabled = false; btn.textContent = "Yayınla";
   if (!r.ok) { toast(explainError(r), true); return; }
-  logPublished(r.data, true); toast("Yayınlandı: " + r.data.title);
+  logPublished(r.data, true, reused); toast("Yayınlandı: " + r.data.title);
+  draftId = null;
   e.target.reset(); $("draft-box").hidden = true; clearPreview(drop, $("drop-text"));
   loadBoard();
 });

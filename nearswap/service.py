@@ -6,13 +6,17 @@ kalır. Verilmezse (testlerde) her şey bellekte tutulur.
 
 from __future__ import annotations
 
+import threading
 import uuid
+from collections import OrderedDict
+from dataclasses import dataclass
 from decimal import Decimal
 
 from nearswap.ai import AIService
 from nearswap.builder import ListingDirector
 from nearswap.models import (
     Category,
+    DraftNotFoundError,
     Listing,
     ListingDraft,
     ListingNotFoundError,
@@ -21,6 +25,18 @@ from nearswap.models import (
 )
 from nearswap.moderation import ModerationHandler
 from nearswap.storage import JsonFileStore
+
+
+MAX_PENDING_DRAFTS = 50
+"""Yayınlanmayı bekleyen en fazla taslak sayısı; daha eskileri unutulur."""
+
+
+@dataclass(frozen=True)
+class PreparedDraft:
+    """Fotoğraftan üretilmiş ve yayınlanmayı bekleyen taslak."""
+
+    draft_id: str
+    draft: ListingDraft
 
 
 class ListingService:
@@ -37,6 +53,9 @@ class ListingService:
         self._store = store
         self._listings: dict[str, Listing] = store.load_listings() if store else {}
         self._photos: dict[str, tuple[bytes, str]] = {}  # yalnızca store yokken kullanılır
+        # Fotoğraf seçilirken üretilen taslaklar: yayınlarken yapay zekâ ikinci kez çağrılmaz.
+        self._drafts: OrderedDict[str, tuple[bytes, str, ListingDraft]] = OrderedDict()
+        self._drafts_lock = threading.Lock()
 
     # --- Fotoğraflar ---------------------------------------------------------------------
 
@@ -66,8 +85,50 @@ class ListingService:
 
     # --- İlan verme ----------------------------------------------------------------------
 
-    def suggest_draft(self, photo: bytes, mime_type: str) -> ListingDraft:
-        return self._ai.draft_listing(photo, mime_type)
+    def prepare_draft(self, photo: bytes, mime_type: str) -> PreparedDraft:
+        """Fotoğraftan taslak üretir ve yayınlanana kadar saklar."""
+        draft = self._ai.draft_listing(photo, mime_type)
+        draft_id = uuid.uuid4().hex
+        with self._drafts_lock:
+            self._drafts[draft_id] = (photo, mime_type, draft)
+            while len(self._drafts) > MAX_PENDING_DRAFTS:
+                self._drafts.popitem(last=False)
+        return PreparedDraft(draft_id, draft)
+
+    def create_from_draft(
+        self,
+        draft_id: str,
+        *,
+        room_id: str,
+        seller_id: str,
+        title: str | None = None,
+        price: Decimal | None = None,
+        category: Category | None = None,
+        description: str | None = None,
+    ) -> Listing:
+        """Daha önce üretilmiş taslaktan ilan verir; yapay zekâ yalnızca denetim için çağrılır.
+
+        İlan reddedilirse taslak saklanmaya devam eder; kullanıcı düzeltip yeniden deneyebilir.
+        """
+        with self._drafts_lock:
+            entry = self._drafts.get(draft_id)
+        if entry is None:
+            raise DraftNotFoundError(draft_id)
+        photo, mime_type, draft = entry
+        listing = self._publish_draft(
+            draft,
+            photo,
+            mime_type,
+            room_id=room_id,
+            seller_id=seller_id,
+            title=title,
+            price=price,
+            category=category,
+            description=description,
+        )
+        with self._drafts_lock:
+            self._drafts.pop(draft_id, None)
+        return listing
 
     def create_from_form(
         self,
@@ -104,6 +165,33 @@ class ListingService:
         description: str | None = None,
     ) -> Listing:
         draft = self._ai.draft_listing(photo, mime_type)
+        return self._publish_draft(
+            draft,
+            photo,
+            mime_type,
+            room_id=room_id,
+            seller_id=seller_id,
+            title=title,
+            price=price,
+            category=category,
+            description=description,
+        )
+
+    def _publish_draft(
+        self,
+        draft: ListingDraft,
+        photo: bytes,
+        mime_type: str,
+        *,
+        room_id: str,
+        seller_id: str,
+        title: str | None,
+        price: Decimal | None,
+        category: Category | None,
+        description: str | None,
+    ) -> Listing:
+        """Taslaktan ilanı kurar (Builder), denetler (Chain) ve yayınlar (State).
+        İlan reddedilirse kaydedilen fotoğraf silinir."""
         photo_url = self.save_photo(photo, mime_type)
         try:
             listing = self._director.from_ai_draft(

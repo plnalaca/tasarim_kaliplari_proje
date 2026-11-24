@@ -208,6 +208,7 @@ classDiagram
 - **Güvenli taraf.** Denetim yanıtı okunamazsa ilan reddedilir; yapay zekâ hatası yüzünden uygunsuz bir ilanın yayınlanması yerine ilanın reddedilmesi tercih edilir.
 - **İstemci dışarıdan verilir.** SDK istemcisi adaptörün kurucusuna parametre olarak verilir; testlerde aynı biçimde yanıt veren sahte istemciler kullanılır.
 - **Yapılandırma ile seçim.** `create_ai_service()` sağlayıcıyı `.env` içindeki `NEARSWAP_AI_PROVIDER` değerine göre kurar; sağlayıcı değiştirmek kodda değişiklik gerektirmez. SDK'lar yalnızca ilgili sağlayıcı seçildiğinde içe aktarılır.
+- **Düşük gecikme.** Gemini 3.8 Flash, düşünme düzeyi belirtilmezse "medium" düzeyde çalışır. Taslak çıkarma ve içerik denetimi derin akıl yürütme gerektirmediği için düzey `low` olarak verilir (`.env` içinde `NEARSWAP_GEMINI_THINKING` ile değiştirilebilir).
 - **Geçici hatalara dayanıklılık.** Her istek 30 saniyelik zaman aşımına sahiptir; sağlayıcının geçici hatalarında (429, 500, 502, 503, 504) istek 2 ve 4 saniye arayla en fazla üç kez denenir. Hepsi başarısız olursa API 503 döner, sunucu çalışmaya devam eder.
 
 ### Neden başka bir kalıp değil
@@ -215,7 +216,7 @@ classDiagram
 - **Facade değil:** Sorun bir alt sistemin karmaşıklığı değil, önceden belirlenmiş bir hedef arayüz ile ona uymayan iki hazır kütüphane arasındaki uyumsuzluk.
 - **Strategy değil:** Asıl işi dış SDK'lar yapar; adaptörler algoritma değil çeviri içerir.
 
-### Testler · `tests/test_ai.py` (34 test)
+### Testler · `tests/test_ai.py` (37 test)
 
 Her iki adaptör, sahte SDK istemcileriyle doğru isteği gönderdikleri ve yanıtı doğru çevirdikleri açısından sınanır; bozuk yanıtlar, kod bloğu içindeki JSON, okunamayan denetim yanıtı, sağlayıcı seçimi, eksik anahtar ile zaman aşımı ve yeniden deneme ayarları test edilir.
 
@@ -267,7 +268,7 @@ Zincir mekanizması (bağlama, iletme, ilk retle durma), her halkanın tek baş�
 
 ## 7. Kalıpların birlikte çalışması
 
-Fotoğraftan ilan verilirken bir istek dört kalıbın da içinden geçer:
+Fotoğraftan ilan verme iki istekten oluşur ve dört kalıbın da içinden geçer. Fotoğraf seçildiğinde üretilen taslak sunucuda saklanır; "Yayınla"ya basıldığında yeniden üretilmez, kullanıcının düzeltmeleriyle birlikte Builder'a verilir. Böylece yapay zekâ bir ilan için iki kez çağrılır: bir kez taslak, bir kez denetim için.
 
 ```mermaid
 sequenceDiagram
@@ -277,9 +278,11 @@ sequenceDiagram
     participant D as ListingDirector (Builder)
     participant C as Denetim zinciri
     participant L as Listing (State)
-    U->>S: fotoğraf + düzeltmeler
+    U->>S: fotoğraf (POST /ai/draft)
     S->>AI: draft_listing(photo)
     AI-->>S: ListingDraft
+    S-->>U: öneri + draft_id (taslak saklanır)
+    U->>S: draft_id + düzeltmeler (POST /listings/from-draft)
     S->>D: from_ai_draft(draft, düzeltmeler)
     D-->>S: Listing (taslak)
     S->>C: handle(listing)
@@ -299,22 +302,23 @@ Adapter iki yerde devreye girer: taslak üretirken ve zincirin son halkasında. 
 | İçerik denetimi reddi | Chain of Responsibility (`ModerationRejectedError`) | 422, sebep ve reddeden halka |
 | Durumda izin verilmeyen işlem | State (`InvalidTransitionError`) | 409 |
 | Bulunamayan ilan | `ListingNotFoundError` | 404 |
+| Saklanan taslağın bulunamaması (sunucu yeniden başladı) | `DraftNotFoundError` | 404; arayüz fotoğrafı yeniden göndererek tek adımda yayınlar |
 | Yapay zekâ servisine ulaşılamaması | Adapter (yeniden denemelerden sonra) | 503 |
 
 Reddedilen bir ilan kaydedilmez; fotoğraftan ilan verilirken reddedilen ilanın fotoğrafı da silinir.
 
 ## 9. Test stratejisi
 
-117 test, gerçek API'ye hiç istek atmadan çalışır; yapay zekâ gereken yerlerde `FakeAIAdapter` ya da sahte SDK istemcileri kullanılır.
+125 test, gerçek API'ye hiç istek atmadan çalışır; yapay zekâ gereken yerlerde `FakeAIAdapter` ya da sahte SDK istemcileri kullanılır.
 
 | Dosya | Test | Kapsam |
 |---|---|---|
 | `test_builder.py` | 10 | Builder ve Director |
 | `test_states.py` | 18 | Geçiş tablosunun tamamı |
 | `test_models.py` | 11 | Arayüzlerin soyutluğu, Context'in devri, varsayılan durum davranışı |
-| `test_ai.py` | 34 | İki adaptör, yanıt çevirme, sağlayıcı seçimi |
+| `test_ai.py` | 37 | İki adaptör, yanıt çevirme, sağlayıcı seçimi |
 | `test_moderation.py` | 16 | Zincir ve halkalar |
 | `test_storage.py` | 12 | Yeniden başlatma sonrası ilanlar, durumlar ve fotoğraflar |
-| `test_api.py` | 16 | Uçtan uca HTTP akışları ve hata kodları |
+| `test_api.py` | 21 | Uçtan uca HTTP akışları, hata kodları ve taslağın yeniden kullanılması |
 
 Ek olarak mypy strict modunda hatasız geçer.

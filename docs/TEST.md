@@ -1,6 +1,6 @@
 # NearSwap Test Dokümanı
 
-117 otomatik testin hepsi geçiyor ve kodun yüzde 99'unu çalıştırıyor (678 komuttan 668'i). Kod mypy strict modunda hatasız geçiyor.
+125 otomatik testin hepsi geçiyor ve kodun yüzde 99'unu çalıştırıyor (738 komuttan 728'i). Kod mypy strict modunda hatasız geçiyor.
 
 ## Çalıştırma
 
@@ -24,10 +24,10 @@ Testler gerçek yapay zekâ API'sine hiç istek atmaz ve kullanıcının `data/`
 
 | Dosya | Test | Neyi doğrular |
 |---|---|---|
-| `tests/test_ai.py` | 34 | İki adaptörün doğru isteği gönderip yanıtı ortak tiplere çevirmesi, bozuk yanıtlar, sağlayıcı seçimi, zaman aşımı ve yeniden deneme ayarları (Adapter) |
+| `tests/test_ai.py` | 37 | İki adaptörün doğru isteği gönderip yanıtı ortak tiplere çevirmesi, bozuk yanıtlar, sağlayıcı seçimi, zaman aşımı, yeniden deneme ve Gemini düşünme düzeyi ayarları (Adapter) |
 | `tests/test_states.py` | 18 | Geçiş tablosunun 16 hücresinin her biri, hata mesajı, arayüzün soyutluğu (State) |
 | `tests/test_moderation.py` | 16 | Zincirin bağlanması ve ilk retle durması, her halka, Türkçe büyük harf, kelime sınırı, ucuz kontrol reddedince yapay zekânın çağrılmaması (Chain of Responsibility) |
-| `tests/test_api.py` | 16 | Uçtan uca HTTP akışları, hata kodları (422, 409, 404, 415, 503), arayüz sayfası |
+| `tests/test_api.py` | 21 | Uçtan uca HTTP akışları, hata kodları (422, 409, 404, 415, 503), arayüz sayfası, saklanan taslaktan yayınlarken yapay zekânın taslak için yeniden çağrılmaması |
 | `tests/test_storage.py` | 12 | Sunucu yeniden başladıktan sonra ilanların, durumların ve fotoğrafların geri gelmesi, bozuk dosyalar |
 | `tests/test_models.py` | 11 | Arayüzlerin soyutluğu, `Listing`'in her işlemi duruma devretmesi, varsayılan durum davranışı |
 | `tests/test_builder.py` | 10 | Eksik alanların birlikte bildirilmesi, iki Director senaryosu, kullanıcının taslağı düzeltmesi (Builder) |
@@ -40,6 +40,7 @@ Testler gerçek yapay zekâ API'sine hiç istek atmaz ve kullanıcının `data/`
 | Builder | `test_director_from_ai_draft_lets_user_fix_category_and_description` | Kullanıcının verdiği alanlar yapay zekâ taslağının yerine geçer |
 | Adapter | `test_both_adapters_return_the_same_draft_for_the_same_answer` | İki sağlayıcı aynı yanıttan aynı `ListingDraft`'ı üretir |
 | Adapter | `test_gemini_moderate_rejects_when_answer_is_unreadable` | Okunamayan denetim yanıtında ilan reddedilir |
+| Builder, Adapter | `test_publishing_from_draft_calls_the_ai_draft_only_once` | Fotoğraf seçilirken üretilen taslak yayınlarken yeniden kullanılır; yapay zekâ taslak için bir kez çağrılır |
 | State | `test_transition_table` (16 durum) | Her durum yalnızca izin verdiği işlemi kabul eder, reddedilen işlem durumu değiştirmez |
 | State | `test_restored_listing_still_follows_state_rules` | Diskten yüklenen satılmış ilan da rezerve edilemez |
 | Chain of Responsibility | `test_default_chain_does_not_call_ai_when_banned_word_rejects` | Ucuz kontrol reddederse yapay zekâ çağrılmaz |

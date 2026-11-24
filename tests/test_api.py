@@ -216,3 +216,72 @@ def test_ai_outage_message_names_the_error_type() -> None:
     response = TestClient(create_app(service)).post("/ai/draft", files={"photo": PHOTO})
 
     assert "(RuntimeError)" in response.json()["detail"]
+
+
+# --- Taslağın yeniden kullanılması: yayınlarken yapay zekâ ikinci kez çağrılmaz ---------------
+
+
+def _draft_id(client: TestClient) -> str:
+    response = client.post("/ai/draft", files={"photo": PHOTO})
+    assert response.status_code == 200
+    return str(response.json()["draft_id"])
+
+
+def test_publishing_from_draft_calls_the_ai_draft_only_once(client: TestClient, ai: FakeAIAdapter) -> None:
+    draft_id = _draft_id(client)
+
+    response = client.post(
+        "/listings/from-draft",
+        json={"draft_id": draft_id, "room_id": "yurt-a", "seller_id": "pelin", "title": "Gri hırka", "category": "giyim"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert (body["title"], body["category"], body["status"]) == ("Gri hırka", "giyim", "aktif")
+    assert body["description"] == "Az kullanılmış, sorunsuz çalışan masa lambası."  # verilmeyen alan taslaktan
+    assert len(ai.draft_calls) == 1  # yalnızca öneri sırasında
+    assert len(ai.moderate_calls) == 1  # yayınlarken yalnızca denetim
+    assert client.get(body["photos"][0]).content == PHOTO[1]
+
+
+def test_draft_is_used_once(client: TestClient) -> None:
+    draft_id = _draft_id(client)
+    body = {"draft_id": draft_id, "room_id": "yurt-a", "seller_id": "pelin"}
+
+    assert client.post("/listings/from-draft", json=body).status_code == 201
+    again = client.post("/listings/from-draft", json=body)
+
+    assert again.status_code == 404
+    assert again.json()["error"] == "taslak_bulunamadi"
+
+
+def test_rejected_draft_can_be_corrected_and_published(client: TestClient) -> None:
+    draft_id = _draft_id(client)
+    base = {"draft_id": draft_id, "room_id": "yurt-a", "seller_id": "pelin"}
+
+    rejected = client.post("/listings/from-draft", json={**base, "title": "Satılık tabanca kılıfı"})
+    fixed = client.post("/listings/from-draft", json={**base, "title": "Satılık masa lambası"})
+
+    assert rejected.status_code == 422
+    assert fixed.status_code == 201
+    assert [l["title"] for l in client.get("/rooms/yurt-a/listings").json()] == ["Satılık masa lambası"]
+
+
+def test_unknown_draft_returns_404(client: TestClient) -> None:
+    response = client.post("/listings/from-draft", json={"draft_id": "yok", "room_id": "yurt-a", "seller_id": "pelin"})
+
+    assert response.status_code == 404
+    assert "Fotoğrafı yeniden seçin" in response.json()["detail"]
+
+
+def test_only_the_latest_drafts_are_kept() -> None:
+    from nearswap.service import MAX_PENDING_DRAFTS
+
+    ai = FakeAIAdapter()
+    service = ListingService(ai, build_default_chain(ai), ListingDirector(StandardListingBuilder()))
+    first = service.prepare_draft(b"x", "image/png")
+    for _ in range(MAX_PENDING_DRAFTS):
+        service.prepare_draft(b"x", "image/png")
+
+    with pytest.raises(Exception, match="Taslak bulunamadı"):
+        service.create_from_draft(first.draft_id, room_id="yurt-a", seller_id="pelin")

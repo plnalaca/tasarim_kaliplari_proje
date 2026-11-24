@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from decimal import Decimal
@@ -29,16 +30,16 @@ from nearswap.ai import create_ai_service
 from nearswap.builder import ListingDirector, StandardListingBuilder
 from nearswap.models import (
     Category,
+    DraftNotFoundError,
     InvalidTransitionError,
     Listing,
-    ListingDraft,
     ListingNotFoundError,
     ListingValidationError,
     ModerationRejectedError,
     NearSwapError,
 )
 from nearswap.moderation import build_default_chain
-from nearswap.service import ListingService
+from nearswap.service import ListingService, PreparedDraft
 from nearswap.storage import JsonFileStore
 
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
@@ -90,19 +91,32 @@ class PhotoOut(BaseModel):
 
 
 class DraftOut(BaseModel):
+    draft_id: str = Field(description="İlanı /listings/from-draft ile yayınlarken kullanılır")
     title: str
     category: Category
     description: str
     suggested_price: Decimal
 
     @classmethod
-    def of(cls, draft: ListingDraft) -> DraftOut:
+    def of(cls, prepared: PreparedDraft) -> DraftOut:
+        draft = prepared.draft
         return cls(
+            draft_id=prepared.draft_id,
             title=draft.title,
             category=draft.category,
             description=draft.description,
             suggested_price=draft.suggested_price,
         )
+
+
+class DraftListingIn(BaseModel):
+    draft_id: str
+    room_id: str = Field(examples=["yurt-a-blok"])
+    seller_id: str = Field(examples=["pelin"])
+    title: str | None = None
+    price: Decimal | None = None
+    category: Category | None = None
+    description: str | None = None
 
 
 # --- Uygulama -----------------------------------------------------------------------------
@@ -116,14 +130,18 @@ def create_default_service() -> ListingService:
 
 
 @contextmanager
-def _ai_errors() -> Iterator[None]:
+def _ai_errors(task: str) -> Iterator[None]:
     """Yapay zekâ servisi hata verirse (ağ, kota, geçici yoğunluk, okunamayan yanıt) 503 döner.
 
     Alan hataları (NearSwapError) kendi eşlemeleriyle (422, 409, 404) dönmeye devam eder.
+    Her işlemin süresi Terminal'e yazılır; yavaşlığın nerede olduğu buradan görülür.
     """
+    started = time.perf_counter()
     try:
         yield
+        logger.info("%s: %.1f sn", task, time.perf_counter() - started)
     except NearSwapError:
+        logger.info("%s: %.1f sn (reddedildi)", task, time.perf_counter() - started)
         raise
     except Exception as exc:
         logger.exception("Yapay zekâ çağrısı başarısız oldu")
@@ -173,6 +191,10 @@ def create_app(service: ListingService | None = None) -> FastAPI:
     async def _transition(_: Request, exc: InvalidTransitionError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"error": "gecersiz_islem", "detail": str(exc)})
 
+    @app.exception_handler(DraftNotFoundError)
+    async def _draft_missing(_: Request, exc: DraftNotFoundError) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"error": "taslak_bulunamadi", "detail": str(exc)})
+
     @app.exception_handler(ListingNotFoundError)
     async def _not_found(_: Request, exc: ListingNotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"error": "bulunamadi", "detail": str(exc)})
@@ -186,12 +208,33 @@ def create_app(service: ListingService | None = None) -> FastAPI:
 
     @app.post("/ai/draft", response_model=DraftOut, tags=["yapay zekâ"])
     async def suggest_draft(photo: Annotated[UploadFile, File()]) -> DraftOut:
-        """Fotoğraftan ilan taslağı önerir. İlan oluşturmaz."""
+        """Fotoğraftan ilan taslağı önerir ve saklar. İlan oluşturmaz.
+
+        Dönen draft_id ile /listings/from-draft çağrılırsa yapay zekâ ikinci kez çağrılmaz.
+        """
         data, mime_type = await _read_photo(photo)
         # Yapay zekâ çağrısı saniyeler sürebilir; ayrı iş parçacığında çalışır ki sunucu donmasın.
-        with _ai_errors():
-            draft = await run_in_threadpool(svc.suggest_draft, data, mime_type)
-        return DraftOut.of(draft)
+        with _ai_errors("Taslak önerisi"):
+            prepared = await run_in_threadpool(svc.prepare_draft, data, mime_type)
+        return DraftOut.of(prepared)
+
+    @app.post("/listings/from-draft", response_model=ListingOut, status_code=201, tags=["ilanlar"])
+    def create_from_draft(body: DraftListingIn) -> ListingOut:
+        """/ai/draft ile üretilmiş taslaktan ilan verir; yapay zekâ yalnızca denetim için çağrılır.
+
+        Başlık, fiyat, kategori ya da açıklama verilirse taslaktakinin yerine geçer.
+        """
+        with _ai_errors("Taslaktan ilan"):
+            listing = svc.create_from_draft(
+                body.draft_id,
+                room_id=body.room_id,
+                seller_id=body.seller_id,
+                title=body.title or None,
+                price=body.price,
+                category=body.category,
+                description=body.description or None,
+            )
+        return ListingOut.of(listing)
 
     @app.post("/listings/from-photo", response_model=ListingOut, status_code=201, tags=["ilanlar"])
     async def create_from_photo(
@@ -208,7 +251,7 @@ def create_app(service: ListingService | None = None) -> FastAPI:
         Başlık, fiyat, kategori ya da açıklama verilirse taslaktakinin yerine geçer.
         """
         data, mime_type = await _read_photo(photo)
-        with _ai_errors():
+        with _ai_errors("Fotoğraftan ilan"):
             listing = await run_in_threadpool(
                 svc.create_from_photo,
                 data,
@@ -225,7 +268,7 @@ def create_app(service: ListingService | None = None) -> FastAPI:
     @app.post("/listings", response_model=ListingOut, status_code=201, tags=["ilanlar"])
     def create_listing(body: ListingIn) -> ListingOut:
         """Elle doldurulan formdan ilan verir."""
-        with _ai_errors():  # denetim zincirinin son halkası yapay zekâyı çağırır
+        with _ai_errors("Formdan ilan"):  # denetim zincirinin son halkası yapay zekâyı çağırır
             listing = svc.create_from_form(
                 room_id=body.room_id,
                 seller_id=body.seller_id,

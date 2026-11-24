@@ -39,7 +39,7 @@ uvicorn nearswap.api:app
 Varsayılan yapay zekâ sağlayıcısı `fake`'tir: API anahtarı gerektirmez ve her fotoğrafa sabit bir taslak döner. Gerçek yapay zekâ için `.env` içinde `NEARSWAP_AI_PROVIDER=gemini` (ya da `openai`) yapılır ve ilgili anahtar girilir.
 
 ```bash
-pytest                                    # 117 test, kodun %99'u; ayrıntı: docs/TEST.md
+pytest                                    # 125 test, kodun %99'u; ayrıntı: docs/TEST.md
 mypy                                      # strict tip denetimi
 python scripts/try_ai.py urun.jpg         # seçili sağlayıcıyı sunucu olmadan deneme
 ```
@@ -85,20 +85,25 @@ Bütün arayüzler `abc.ABC` ile tanımlıdır ve her rol ayrı bir sınıfla ka
 ## Fotoğraftan ilan verme akışı
 
 ```
-POST /listings/from-photo
-  ├─ AIService.draft_listing(photo)         Adapter   -> ListingDraft
+POST /ai/draft                              fotoğraf seçilince
+  └─ AIService.draft_listing(photo)         Adapter   -> ListingDraft (sunucuda saklanır, draft_id döner)
+
+POST /listings/from-draft                   Yayınla'ya basınca (kullanıcının düzeltmeleriyle)
   ├─ ListingDirector.from_ai_draft(...)     Builder   -> Listing (taslak)
   ├─ zincir.handle(listing)                 Chain     -> BannedWords → PriceSanity → AIModeration
   └─ listing.publish()                      State     -> aktif
 ```
+
+Taslak yayınlarken yeniden üretilmez; yapay zekâ bir kez taslak, bir kez denetim için çağrılır.
 
 ## Uç noktalar
 
 | Yöntem | Yol | Ne yapar |
 |---|---|---|
 | GET | `/` | Kullanıcı arayüzü |
-| POST | `/ai/draft` | Fotoğraftan taslak önerir, ilan oluşturmaz |
-| POST | `/listings/from-photo` | Fotoğraftan ilan verir (başlık, fiyat, kategori, açıklama isteğe bağlı) |
+| POST | `/ai/draft` | Fotoğraftan taslak önerir ve saklar (`draft_id` döner), ilan oluşturmaz |
+| POST | `/listings/from-draft` | Saklanan taslaktan ilan verir; yapay zekâ yalnızca denetim için çağrılır |
+| POST | `/listings/from-photo` | Fotoğraftan tek adımda ilan verir (başlık, fiyat, kategori, açıklama isteğe bağlı) |
 | POST | `/listings` | Formdan ilan verir |
 | GET | `/rooms/{room_id}/listings` | Odadaki ilanlar |
 | GET | `/listings/{id}` | Tek ilan |
@@ -117,6 +122,7 @@ Hata kodları: geçersiz ilan ve denetim reddi **422**, ilanın durumunda izin v
 | `NEARSWAP_AI_PROVIDER` | `fake` | `fake`, `gemini` ya da `openai` |
 | `GEMINI_API_KEY`, `OPENAI_API_KEY` | | Seçilen sağlayıcının anahtarı |
 | `NEARSWAP_GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model adı |
+| `NEARSWAP_GEMINI_THINKING` | `low` | Gemini'nin düşünme düzeyi: `low`, `medium` ya da `high`; boş bırakılırsa modelin varsayılanı |
 | `NEARSWAP_OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model adı |
 | `NEARSWAP_DATA_DIR` | `data` | İlanların ve fotoğrafların saklandığı klasör |
 

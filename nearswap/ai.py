@@ -181,7 +181,11 @@ class OpenAIAdapter(AIService):
 
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 
-_GEMINI_JSON_CONFIG = {"response_mime_type": "application/json"}
+DEFAULT_GEMINI_THINKING = "low"
+"""Taslak çıkarma ve içerik denetimi kısa, iyi tanımlı işler; derin akıl yürütme gerektirmez.
+3.8 Flash bu ayar verilmezse "medium" düzeyde düşünür ve yanıt belirgin şekilde gecikir.
+Geçerli değerler: low, medium, high ("minimal" 3.8 Flash'ta desteklenmez). Boş bırakılırsa
+modelin kendi varsayılanı kullanılır (düşünme düzeyi ayarı olmayan eski modeller için)."""
 
 
 class GeminiAdapter(AIService):
@@ -191,9 +195,17 @@ class GeminiAdapter(AIService):
     Denetim yanıtı okunamazsa ilan reddedilir (güvenli taraf).
     """
 
-    def __init__(self, client: Any, model: str = DEFAULT_GEMINI_MODEL) -> None:
+    def __init__(
+        self,
+        client: Any,
+        model: str = DEFAULT_GEMINI_MODEL,
+        thinking_level: str | None = DEFAULT_GEMINI_THINKING,
+    ) -> None:
         self._client = client
         self._model = model
+        self._config: dict[str, Any] = {"response_mime_type": "application/json"}
+        if thinking_level:
+            self._config["thinking_config"] = {"thinking_level": thinking_level}
 
     def draft_listing(self, photo_bytes: bytes, mime_type: str) -> ListingDraft:
         response = self._client.models.generate_content(
@@ -207,7 +219,7 @@ class GeminiAdapter(AIService):
                     ],
                 }
             ],
-            config=_GEMINI_JSON_CONFIG,
+            config=self._config,
         )
         return parse_draft(response.text)
 
@@ -215,7 +227,7 @@ class GeminiAdapter(AIService):
         response = self._client.models.generate_content(
             model=self._model,
             contents=MODERATION_PROMPT + text,
-            config=_GEMINI_JSON_CONFIG,
+            config=self._config,
         )
         # Gemini'nin kendi güvenlik filtresi yanıtı engellerse text boş gelir;
         # parse_moderation bu durumda ilanı reddeder.
@@ -330,7 +342,12 @@ def create_ai_service(env: Mapping[str, str] | None = None) -> AIService:
                 },
             },
         )
-        return GeminiAdapter(gemini_client, model=env.get("NEARSWAP_GEMINI_MODEL") or DEFAULT_GEMINI_MODEL)
+        thinking = env.get("NEARSWAP_GEMINI_THINKING", DEFAULT_GEMINI_THINKING).strip().lower() or None
+        return GeminiAdapter(
+            gemini_client,
+            model=env.get("NEARSWAP_GEMINI_MODEL") or DEFAULT_GEMINI_MODEL,
+            thinking_level=thinking,
+        )
 
     raise AIConfigurationError(
         f"Bilinmeyen NEARSWAP_AI_PROVIDER: {provider!r}. Geçerli değerler: fake, openai, gemini."

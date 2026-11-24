@@ -162,7 +162,10 @@ def test_gemini_draft_sends_photo_bytes_with_mime_type() -> None:
 
     call = client.models.calls[0]
     assert call["model"] == "test-model"
-    assert call["config"] == {"response_mime_type": "application/json"}
+    assert call["config"] == {
+        "response_mime_type": "application/json",
+        "thinking_config": {"thinking_level": "low"},
+    }
     inline = call["contents"][0]["parts"][0]["inline_data"]
     assert inline == {"mime_type": "image/png", "data": PNG}
 
@@ -317,3 +320,31 @@ def test_factory_gives_real_providers_a_timeout_and_retries(monkeypatch: pytest.
     assert isinstance(openai_service, OpenAIAdapter)
     assert openai_service._client.timeout == AI_TIMEOUT_SECONDS
     assert openai_service._client.max_retries == AI_RETRY_ATTEMPTS - 1
+
+
+def test_gemini_moderation_also_uses_low_thinking() -> None:
+    client = FakeGeminiClient(json.dumps({"approved": True, "reason": ""}))
+
+    GeminiAdapter(client).moderate("Masa lambası")
+
+    assert client.models.calls[0]["config"]["thinking_config"] == {"thinking_level": "low"}
+
+
+def test_gemini_thinking_level_can_be_left_to_the_model() -> None:
+    """Düşünme düzeyi ayarı olmayan bir modele geçilirse ayar hiç gönderilmez."""
+    client = FakeGeminiClient(DRAFT_JSON)
+
+    GeminiAdapter(client, thinking_level=None).draft_listing(PNG, "image/png")
+
+    assert "thinking_config" not in client.models.calls[0]["config"]
+
+
+def test_factory_reads_gemini_thinking_level_from_env() -> None:
+    pytest.importorskip("google.genai")
+    env = {"NEARSWAP_AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test", "NEARSWAP_GEMINI_THINKING": "medium"}
+
+    service = create_ai_service(env)
+
+    assert isinstance(service, GeminiAdapter)
+    assert service._config["thinking_config"] == {"thinking_level": "medium"}
+    assert "thinking_config" not in create_ai_service({**env, "NEARSWAP_GEMINI_THINKING": ""})._config  # type: ignore[attr-defined]
