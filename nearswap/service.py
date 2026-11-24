@@ -164,6 +164,23 @@ class ListingService:
         category: Category | None = None,
         description: str | None = None,
     ) -> Listing:
+        if title and price is not None and category is not None:
+            # Kullanıcı ilanın zorunlu alanlarını kendisi girdi (örneğin taslak önerisi yapay zekâ
+            # yoğun olduğu için gelmedi): taslak istemeye gerek yok, form yoluyla kurulur.
+            photo_url = self.save_photo(photo, mime_type)
+            try:
+                return self.create_from_form(
+                    room_id=room_id,
+                    seller_id=seller_id,
+                    title=title,
+                    price=price,
+                    category=category,
+                    description=description or "",
+                    photo_urls=[photo_url],
+                )
+            except NearSwapError:
+                self._discard_photo(photo_url)
+                raise
         draft = self._ai.draft_listing(photo, mime_type)
         return self._publish_draft(
             draft,

@@ -348,3 +348,79 @@ def test_factory_reads_gemini_thinking_level_from_env() -> None:
     assert isinstance(service, GeminiAdapter)
     assert service._config["thinking_config"] == {"thinking_level": "medium"}
     assert "thinking_config" not in create_ai_service({**env, "NEARSWAP_GEMINI_THINKING": ""})._config  # type: ignore[attr-defined]
+
+
+# --- Gemini: yoğun ana modelden yedek modele geçiş ----------------------------------------
+
+
+class _Overloaded(Exception):
+    """Gemini SDK'nın 503 UNAVAILABLE hatasının yerine."""
+
+
+class _FlakyGeminiModels:
+    """Belirtilen modeller hata verir, diğerleri yanıt döner."""
+
+    def __init__(self, failing: set[str], text: str) -> None:
+        self._failing = failing
+        self._text = text
+        self.calls: list[dict[str, Any]] = []
+
+    def generate_content(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        if kwargs["model"] in self._failing:
+            raise _Overloaded(f"{kwargs['model']} is currently experiencing high demand")
+        return SimpleNamespace(text=self._text)
+
+
+def _flaky_client(failing: set[str], text: str = DRAFT_JSON) -> Any:
+    return SimpleNamespace(models=_FlakyGeminiModels(failing, text))
+
+
+def test_gemini_falls_back_when_main_model_is_overloaded() -> None:
+    client = _flaky_client({"ana"})
+    adapter = GeminiAdapter(client, model="ana", fallback_models=["yedek"])
+
+    draft = adapter.draft_listing(JPEG, "image/jpeg")
+
+    assert draft.title == "Çalışma masası"
+    assert [c["model"] for c in client.models.calls] == ["ana", "yedek"]
+    # Yedek modele düşünme düzeyi gönderilmez; her model kendi varsayılanıyla çalışır.
+    assert "thinking_config" in client.models.calls[0]["config"]
+    assert "thinking_config" not in client.models.calls[1]["config"]
+
+
+def test_gemini_moderation_also_falls_back() -> None:
+    client = _flaky_client({"ana"}, json.dumps({"approved": True, "reason": ""}))
+
+    result = GeminiAdapter(client, model="ana", fallback_models=["yedek"]).moderate("Masa lambası")
+
+    assert result.approved
+    assert [c["model"] for c in client.models.calls] == ["ana", "yedek"]
+
+
+def test_gemini_raises_main_model_error_when_every_model_fails() -> None:
+    client = _flaky_client({"ana", "yedek"})
+
+    with pytest.raises(_Overloaded, match="ana is currently"):
+        GeminiAdapter(client, model="ana", fallback_models=["yedek"]).draft_listing(JPEG, "image/jpeg")
+
+
+def test_gemini_does_not_use_fallback_when_main_model_answers() -> None:
+    client = _flaky_client(set())
+
+    GeminiAdapter(client, model="ana", fallback_models=["yedek"]).draft_listing(JPEG, "image/jpeg")
+
+    assert [c["model"] for c in client.models.calls] == ["ana"]
+
+
+def test_factory_sets_default_fallback_and_allows_turning_it_off() -> None:
+    pytest.importorskip("google.genai")
+    from nearswap.ai import DEFAULT_GEMINI_FALLBACK_MODELS
+
+    env = {"NEARSWAP_AI_PROVIDER": "gemini", "GEMINI_API_KEY": "test"}
+    default = create_ai_service(env)
+    off = create_ai_service({**env, "NEARSWAP_GEMINI_FALLBACK_MODELS": ""})
+
+    assert isinstance(default, GeminiAdapter) and isinstance(off, GeminiAdapter)
+    assert default._models == ["gemini-3.8-flash", *DEFAULT_GEMINI_FALLBACK_MODELS]
+    assert off._models == ["gemini-3.8-flash"]

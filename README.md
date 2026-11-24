@@ -39,7 +39,7 @@ uvicorn nearswap.api:app
 Varsayılan yapay zekâ sağlayıcısı `fake`'tir: API anahtarı gerektirmez ve her fotoğrafa sabit bir taslak döner. Gerçek yapay zekâ için `.env` içinde `NEARSWAP_AI_PROVIDER=gemini` (ya da `openai`) yapılır ve ilgili anahtar girilir.
 
 ```bash
-pytest                                    # 125 test, kodun %99'u; ayrıntı: docs/TEST.md
+pytest                                    # 131 test, kodun %98'i; ayrıntı: docs/TEST.md
 mypy                                      # strict tip denetimi
 python scripts/try_ai.py urun.jpg         # seçili sağlayıcıyı sunucu olmadan deneme
 ```
@@ -123,6 +123,7 @@ Hata kodları: geçersiz ilan ve denetim reddi **422**, ilanın durumunda izin v
 | `GEMINI_API_KEY`, `OPENAI_API_KEY` | | Seçilen sağlayıcının anahtarı |
 | `NEARSWAP_GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model adı |
 | `NEARSWAP_GEMINI_THINKING` | `low` | Gemini'nin düşünme düzeyi: `low`, `medium` ya da `high`; boş bırakılırsa modelin varsayılanı |
+| `NEARSWAP_GEMINI_FALLBACK_MODELS` | `gemini-3.1-flash-lite` | Ana model yoğunken sırayla denenen yedek modeller (virgülle ayrılır); boş bırakılırsa yedek kullanılmaz |
 | `NEARSWAP_OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model adı |
 | `NEARSWAP_DATA_DIR` | `data` | İlanların ve fotoğrafların saklandığı klasör |
 

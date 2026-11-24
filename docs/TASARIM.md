@@ -209,14 +209,15 @@ classDiagram
 - **İstemci dışarıdan verilir.** SDK istemcisi adaptörün kurucusuna parametre olarak verilir; testlerde aynı biçimde yanıt veren sahte istemciler kullanılır.
 - **Yapılandırma ile seçim.** `create_ai_service()` sağlayıcıyı `.env` içindeki `NEARSWAP_AI_PROVIDER` değerine göre kurar; sağlayıcı değiştirmek kodda değişiklik gerektirmez. SDK'lar yalnızca ilgili sağlayıcı seçildiğinde içe aktarılır.
 - **Düşük gecikme.** Gemini 3.8 Flash, düşünme düzeyi belirtilmezse "medium" düzeyde çalışır. Taslak çıkarma ve içerik denetimi derin akıl yürütme gerektirmediği için düzey `low` olarak verilir (`.env` içinde `NEARSWAP_GEMINI_THINKING` ile değiştirilebilir).
-- **Geçici hatalara dayanıklılık.** Her istek 30 saniyelik zaman aşımına sahiptir; sağlayıcının geçici hatalarında (429, 500, 502, 503, 504) istek 2 ve 4 saniye arayla en fazla üç kez denenir. Hepsi başarısız olursa API 503 döner, sunucu çalışmaya devam eder.
+- **Geçici hatalara dayanıklılık.** Her deneme 20 saniyelik zaman aşımına sahiptir; sağlayıcının geçici hatalarında (429, 500, 502, 503, 504) istek 2 saniye sonra bir kez daha denenir. Hepsi başarısız olursa API 503 döner, sunucu çalışmaya devam eder.
+- **Yedek model.** Gemini'nin ana modeli yoğunken (503) ya da yanıt vermezken `GeminiAdapter` aynı isteği sırayla yedek modellere (varsayılan `gemini-3.1-flash-lite`) gönderir. Bu geçiş Adapter'ın içinde kalır: `ListingService` ve denetim zinciri hangi modelin yanıt verdiğini bilmez. Hepsi başarısız olursa ana modelin hatası bildirilir.
 
 ### Neden başka bir kalıp değil
 
 - **Facade değil:** Sorun bir alt sistemin karmaşıklığı değil, önceden belirlenmiş bir hedef arayüz ile ona uymayan iki hazır kütüphane arasındaki uyumsuzluk.
 - **Strategy değil:** Asıl işi dış SDK'lar yapar; adaptörler algoritma değil çeviri içerir.
 
-### Testler · `tests/test_ai.py` (37 test)
+### Testler · `tests/test_ai.py` (42 test)
 
 Her iki adaptör, sahte SDK istemcileriyle doğru isteği gönderdikleri ve yanıtı doğru çevirdikleri açısından sınanır; bozuk yanıtlar, kod bloğu içindeki JSON, okunamayan denetim yanıtı, sağlayıcı seçimi, eksik anahtar ile zaman aşımı ve yeniden deneme ayarları test edilir.
 
@@ -309,16 +310,16 @@ Reddedilen bir ilan kaydedilmez; fotoğraftan ilan verilirken reddedilen ilanın
 
 ## 9. Test stratejisi
 
-125 test, gerçek API'ye hiç istek atmadan çalışır; yapay zekâ gereken yerlerde `FakeAIAdapter` ya da sahte SDK istemcileri kullanılır.
+131 test, gerçek API'ye hiç istek atmadan çalışır; yapay zekâ gereken yerlerde `FakeAIAdapter` ya da sahte SDK istemcileri kullanılır.
 
 | Dosya | Test | Kapsam |
 |---|---|---|
 | `test_builder.py` | 10 | Builder ve Director |
 | `test_states.py` | 18 | Geçiş tablosunun tamamı |
 | `test_models.py` | 11 | Arayüzlerin soyutluğu, Context'in devri, varsayılan durum davranışı |
-| `test_ai.py` | 37 | İki adaptör, yanıt çevirme, sağlayıcı seçimi |
+| `test_ai.py` | 42 | İki adaptör, yanıt çevirme, sağlayıcı seçimi, yedek model |
 | `test_moderation.py` | 16 | Zincir ve halkalar |
 | `test_storage.py` | 12 | Yeniden başlatma sonrası ilanlar, durumlar ve fotoğraflar |
-| `test_api.py` | 21 | Uçtan uca HTTP akışları, hata kodları ve taslağın yeniden kullanılması |
+| `test_api.py` | 22 | Uçtan uca HTTP akışları, hata kodları ve taslağın yeniden kullanılması |
 
 Ek olarak mypy strict modunda hatasız geçer.

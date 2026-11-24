@@ -56,6 +56,7 @@ Sunucu açılınca iki adres kullanılır:
 | `OPENAI_API_KEY` | | OpenAI kullanılırken gerekli |
 | `NEARSWAP_GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model adı |
 | `NEARSWAP_GEMINI_THINKING` | `low` | Gemini'nin düşünme düzeyi: `low`, `medium` ya da `high`; boş bırakılırsa modelin varsayılanı |
+| `NEARSWAP_GEMINI_FALLBACK_MODELS` | `gemini-3.1-flash-lite` | Ana model yoğunken sırayla denenen yedek modeller (virgülle ayrılır); boş bırakılırsa yedek kullanılmaz |
 | `NEARSWAP_OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model adı |
 | `NEARSWAP_DATA_DIR` | `data` | İlanların ve fotoğrafların saklandığı klasör |
 
@@ -77,6 +78,6 @@ Betik, fotoğraftan çıkarılan taslağı ve iki örnek metnin denetim sonucunu
 | Ana adreste `{"detail":"Not Found"}` | Eski bir sürüm çalışıyor. Depoyu güncelleyip sunucuyu yeniden başlatın. |
 | `address already in use` | 8000 portu dolu. `uvicorn nearswap.api:app --port 8001` ile başka port kullanın. |
 | Sunucu açılırken `GEMINI_API_KEY tanımlı değil` | Gemini seçili ama anahtar yok. Anahtarı `.env`'e yazın ya da sağlayıcıyı `fake` yapın. |
-| Arayüzde 503 hatası | Yapay zekâ servisine ulaşılamıyor (örneğin geçici yoğunluk). Sistem isteği üç kez dener; sorun sürerse biraz sonra tekrar deneyin. Sebep, sunucunun çalıştığı terminale yazılır. |
+| Arayüzde 503 hatası | Yapay zekâ servisine ulaşılamıyor (örneğin geçici yoğunluk). Sistem isteği bir kez tekrar dener, ardından yedek modele (`gemini-3.1-flash-lite`) geçer; sorun sürerse biraz sonra tekrar deneyin. Sebep, sunucunun çalıştığı terminale yazılır. |
 | Yayınlama yavaş | Sunucunun terminalinde her yapay zekâ işleminin süresi yazar (örneğin `Taslaktan ilan: 2.3 sn`). Süre uzunsa `NEARSWAP_GEMINI_THINKING=low` olduğundan emin olun. |
 | İlanları sıfırlamak | `data/` klasörünü silip sunucuyu yeniden başlatın. |

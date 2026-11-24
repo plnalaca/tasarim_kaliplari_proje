@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -181,6 +182,12 @@ class OpenAIAdapter(AIService):
 
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 
+DEFAULT_GEMINI_FALLBACK_MODELS = ("gemini-3.1-flash-lite",)
+"""Ana model yoğunken (503) ya da yanıt vermezken sırayla denenen modeller. Yedek modellere
+düşünme düzeyi gönderilmez; her biri kendi varsayılanıyla çalışır."""
+
+_logger = logging.getLogger(__name__)
+
 DEFAULT_GEMINI_THINKING = "low"
 """Taslak çıkarma ve içerik denetimi kısa, iyi tanımlı işler; derin akıl yürütme gerektirmez.
 3.8 Flash bu ayar verilmezse "medium" düzeyde düşünür ve yanıt belirgin şekilde gecikir.
@@ -200,17 +207,38 @@ class GeminiAdapter(AIService):
         client: Any,
         model: str = DEFAULT_GEMINI_MODEL,
         thinking_level: str | None = DEFAULT_GEMINI_THINKING,
+        fallback_models: Sequence[str] = (),
     ) -> None:
         self._client = client
-        self._model = model
+        self._models = [model, *[m for m in fallback_models if m and m != model]]
         self._config: dict[str, Any] = {"response_mime_type": "application/json"}
         if thinking_level:
             self._config["thinking_config"] = {"thinking_level": thinking_level}
+        self._fallback_config: dict[str, Any] = {"response_mime_type": "application/json"}
+
+    def _generate(self, contents: Any) -> Any:
+        """Modelleri sırayla dener; biri yanıt verince döner. Hepsi başarısız olursa ilk hatayı
+        fırlatır (ana modelin hatası, sorunun asıl sebebidir)."""
+        first_error: Exception | None = None
+        for index, model in enumerate(self._models):
+            try:
+                return self._client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=self._config if index == 0 else self._fallback_config,
+                )
+            except Exception as exc:
+                first_error = first_error or exc
+                if index + 1 < len(self._models):
+                    _logger.warning(
+                        "%s yanıt vermedi (%s); %s deneniyor", model, type(exc).__name__, self._models[index + 1]
+                    )
+        assert first_error is not None
+        raise first_error
 
     def draft_listing(self, photo_bytes: bytes, mime_type: str) -> ListingDraft:
-        response = self._client.models.generate_content(
-            model=self._model,
-            contents=[
+        response = self._generate(
+            [
                 {
                     "role": "user",
                     "parts": [
@@ -218,17 +246,12 @@ class GeminiAdapter(AIService):
                         {"text": DRAFT_PROMPT},
                     ],
                 }
-            ],
-            config=self._config,
+            ]
         )
         return parse_draft(response.text)
 
     def moderate(self, text: str) -> ModerationResult:
-        response = self._client.models.generate_content(
-            model=self._model,
-            contents=MODERATION_PROMPT + text,
-            config=self._config,
-        )
+        response = self._generate(MODERATION_PROMPT + text)
         # Gemini'nin kendi güvenlik filtresi yanıtı engellerse text boş gelir;
         # parse_moderation bu durumda ilanı reddeder.
         return parse_moderation(response.text, checked_by=type(self).__name__)
@@ -290,12 +313,14 @@ def _require(env: Mapping[str, str], name: str) -> str:
     return value
 
 
-AI_TIMEOUT_SECONDS = 30
-"""Tek bir deneme bu sürede yanıt almazsa kesilir; sayfa sonsuza kadar beklemez."""
+AI_TIMEOUT_SECONDS = 20
+"""Tek bir deneme bu sürede yanıt almazsa kesilir; sayfa sonsuza kadar beklemez. Yoğun anlarda
+model hiç yanıt vermeden bekletebiliyor; kısa tutulur ki yedek modele çabuk geçilsin."""
 
-AI_RETRY_ATTEMPTS = 3
-"""Sağlayıcının geçici hatalarında (yoğunluk 503, kota 429 vb.) ilk istek dahil en fazla deneme sayısı.
-Denemeler arasında 2 ve 4 saniye beklenir. Hepsi başarısız olursa API 503 döner."""
+AI_RETRY_ATTEMPTS = 2
+"""Bir modelin geçici hatalarında (yoğunluk 503, kota 429 vb.) ilk istek dahil deneme sayısı;
+denemeler arasında 2 saniye beklenir. Sonra yedek modele geçilir (Gemini). Hepsi başarısız
+olursa API 503 döner."""
 
 _RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504]
 
@@ -343,10 +368,17 @@ def create_ai_service(env: Mapping[str, str] | None = None) -> AIService:
             },
         )
         thinking = env.get("NEARSWAP_GEMINI_THINKING", DEFAULT_GEMINI_THINKING).strip().lower() or None
+        fallbacks_env = env.get("NEARSWAP_GEMINI_FALLBACK_MODELS")
+        fallbacks = (
+            DEFAULT_GEMINI_FALLBACK_MODELS
+            if fallbacks_env is None
+            else tuple(m.strip() for m in fallbacks_env.split(",") if m.strip())
+        )
         return GeminiAdapter(
             gemini_client,
             model=env.get("NEARSWAP_GEMINI_MODEL") or DEFAULT_GEMINI_MODEL,
             thinking_level=thinking,
+            fallback_models=fallbacks,
         )
 
     raise AIConfigurationError(

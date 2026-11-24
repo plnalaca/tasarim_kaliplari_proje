@@ -320,6 +320,15 @@ function explainError(r) {
   log("Sunucu", msg, true); return msg;
 }
 
+// Yayınlarken geçen süreyi düğmede gösterir; yapay zekâ yoğunken sayfanın takılmadığı görülür.
+function busy(btn) {
+  const started = Date.now();
+  const tick = () => { btn.textContent = `Yayınlanıyor… ${Math.round((Date.now() - started) / 1000)} sn`; };
+  btn.disabled = true; tick();
+  const timer = setInterval(tick, 1000);
+  return () => { clearInterval(timer); btn.disabled = false; btn.textContent = "Yayınla"; };
+}
+
 function logPublished(listing, fromPhoto, reusedDraft = false) {
   if (reusedDraft) log("Adapter", "Fotoğraf seçilirken üretilen taslak kullanıldı; yapay zekâ yalnızca denetim için çağrıldı.");
   else if (fromPhoto) log("Adapter", "Yapay zekâ fotoğraftan taslak üretti.");
@@ -401,7 +410,7 @@ $("photo-form").addEventListener("submit", async (e) => {
     category: $("p-category").value || null,
     description: $("p-desc").value.trim() || null,
   };
-  const btn = $("p-submit"); btn.disabled = true; btn.textContent = "Yayınlanıyor…";
+  const done = busy($("p-submit"));
   let r = null, reused = false;
   if (draftId) {
     // Önerideki taslak sunucuda saklı: fotoğraf yeniden gönderilmez, taslak yeniden üretilmez.
@@ -414,7 +423,7 @@ $("photo-form").addEventListener("submit", async (e) => {
     for (const [k, v] of Object.entries(fields)) if (v !== null) fd.append(k, v);
     r = await call("POST", "/listings/from-photo", fd);
   }
-  btn.disabled = false; btn.textContent = "Yayınla";
+  done();
   if (!r.ok) { toast(explainError(r), true); return; }
   logPublished(r.data, true, reused); toast("Yayınlandı: " + r.data.title);
   draftId = null;
@@ -424,13 +433,13 @@ $("photo-form").addEventListener("submit", async (e) => {
 
 $("manual-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const btn = $("m-submit"); btn.disabled = true; btn.textContent = "Yayınlanıyor…";
+  const done = busy($("m-submit"));
   const photoUrls = [];
   const file = $("m-file").files[0];
   if (file) {
     const fd = new FormData(); fd.append("photo", file);
     const up = await call("POST", "/photos", fd);
-    if (!up.ok) { btn.disabled = false; btn.textContent = "Yayınla"; toast(explainError(up), true); return; }
+    if (!up.ok) { done(); toast(explainError(up), true); return; }
     photoUrls.push(up.data.url);
   }
   const body = {
@@ -440,7 +449,7 @@ $("manual-form").addEventListener("submit", async (e) => {
     photo_urls: photoUrls,
   };
   const r = await call("POST", "/listings", body);
-  btn.disabled = false; btn.textContent = "Yayınla";
+  done();
   if (!r.ok) { toast(explainError(r), true); return; }
   logPublished(r.data, false); toast("Yayınlandı: " + r.data.title);
   e.target.reset(); clearPreview($("m-drop"), $("m-drop-text"));

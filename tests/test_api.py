@@ -285,3 +285,20 @@ def test_only_the_latest_drafts_are_kept() -> None:
 
     with pytest.raises(Exception, match="Taslak bulunamadı"):
         service.create_from_draft(first.draft_id, room_id="yurt-a", seller_id="pelin")
+
+
+def test_from_photo_with_required_fields_does_not_ask_ai_for_a_draft(client: TestClient, ai: FakeAIAdapter) -> None:
+    """Taslak önerisi gelmediyse (yapay zekâ yoğun) ve kullanıcı alanları doldurduysa taslak istenmez."""
+    response = client.post(
+        "/listings/from-photo",
+        files={"photo": PHOTO},
+        data={"room_id": "yurt-a", "seller_id": "pelin", "title": "Kazak", "price": "500", "category": "giyim",
+              "description": "M beden"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert (body["title"], body["price"], body["category"], body["description"]) == ("Kazak", "500", "giyim", "M beden")
+    assert ai.draft_calls == []
+    assert len(ai.moderate_calls) == 1
+    assert client.get(body["photos"][0]).content == PHOTO[1]
